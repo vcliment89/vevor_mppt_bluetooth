@@ -1,11 +1,10 @@
-from homeassistant.components.bluetooth.passive_update_coordinator import (
-    PassiveBluetoothDataUpdateCoordinator,
-    PassiveBluetoothCoordinatorEntity,
-)
-from homeassistant.components.bluetooth import BluetoothServiceInfoBleak, BluetoothChange
+from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
 from homeassistant.components import bluetooth
-from homeassistant.core import callback
-from homeassistant.helpers.update_coordinator import UpdateFailed
+from homeassistant.core import HomeAssistant
+from bleak import BleakClient
+from bleak.exc import BleakError
+from datetime import timedelta
+import asyncio
 
 from .const import DOMAIN, SERVICE_UUID
 import logging
@@ -43,118 +42,117 @@ def parse_mppt_packet(data: bytes) -> dict:
         "battery_temperature": round(battery_temp_raw * 0.1, 2),
     }
 
-class MPPTBLECoordinator(PassiveBluetoothDataUpdateCoordinator):
-    def __init__(self, hass, entry):
+class MPPTBLECoordinator(DataUpdateCoordinator):
+    """Coordinator for MPPT BLE device using active connection."""
+
+    def __init__(self, hass: HomeAssistant, entry):
+        """Initialize the coordinator."""
         self._mac_address = entry.data["mac_address"].upper()
         self._entry = entry
-        _LOGGER.info("Initializing MPPT BLE Coordinator for MAC address: %s", self._mac_address)
         
-        # Use the MAC address but make event handler more permissive for debugging
         super().__init__(
-            hass, 
-            _LOGGER, 
-            address=self._mac_address, 
-            mode=BluetoothChange.ADVERTISEMENT
+            hass,
+            _LOGGER,
+            name=DOMAIN,
+            update_interval=timedelta(seconds=30),  # Update every 30 seconds
         )
-        self.data = None  # Initialize as None instead of empty dict
-        _LOGGER.info("MPPT BLE Coordinator initialized successfully")
         
-        # Add a test to see if Bluetooth is working at all
-        _LOGGER.info("Testing Bluetooth integration availability...")
+        _LOGGER.info("Initializing MPPT BLE Coordinator for MAC address: %s", self._mac_address)
+        _LOGGER.info("Using active Bluetooth connection approach")
+
+    async def _async_update_data(self):
+        """Fetch data from the MPPT device."""
+        _LOGGER.debug("Starting data update for device %s", self._mac_address)
+        
         try:
-            from homeassistant.components import bluetooth
-            if hasattr(bluetooth, 'async_get_scanner'):
-                _LOGGER.info("Bluetooth scanner available")
-                
-                # Try to get current Bluetooth devices
-                try:
-                    scanner = bluetooth.async_get_scanner(hass)
-                    if scanner:
-                        _LOGGER.info("Bluetooth scanner instance obtained")
-                        # Get discovered devices
-                        discovered = bluetooth.async_discovered_service_info(hass)
-                        _LOGGER.info("Found %d discovered Bluetooth devices", len(discovered))
-                        
-                        # Log some device info for debugging
-                        device_list = list(discovered)[:5]  # Convert to list and get first 5
-                        for i, device_info in enumerate(device_list):
-                            _LOGGER.info("Device %d: %s (%s) - name='%s'", 
-                                       i+1, device_info.address, device_info.rssi, device_info.name)
-                            if device_info.address.upper() == self._mac_address:
-                                _LOGGER.warning("Found our target device in discovered devices!")
-                        
-                        # Also check if our target device is in the full list
-                        target_found = False
-                        for device_info in discovered:
-                            if device_info.address.upper() == self._mac_address:
-                                _LOGGER.warning("TARGET DEVICE FOUND: %s - name='%s', rssi=%s", 
-                                              device_info.address, device_info.name, device_info.rssi)
-                                target_found = True
-                                break
-                        
-                        if not target_found:
-                            _LOGGER.warning("Target device %s NOT found in %d discovered devices", 
-                                          self._mac_address, len(discovered))
-                        else:
-                            # Device found! Let's examine its data
-                            for device_info in discovered:
-                                if device_info.address.upper() == self._mac_address:
-                                    _LOGGER.info("EXAMINING TARGET DEVICE DATA:")
-                                    _LOGGER.info("  Address: %s", device_info.address)
-                                    _LOGGER.info("  Name: %s", device_info.name)
-                                    _LOGGER.info("  RSSI: %s", device_info.rssi)
-                                    _LOGGER.info("  Manufacturer data: %s", device_info.manufacturer_data)
-                                    _LOGGER.info("  Service data: %s", device_info.service_data)
-                                    _LOGGER.info("  Service UUIDs: %s", device_info.service_uuids)
-                                    break
-                    else:
-                        _LOGGER.warning("Could not get Bluetooth scanner instance")
-                except Exception as e:
-                    _LOGGER.warning("Error checking discovered devices: %s", e)
-            else:
-                _LOGGER.warning("Bluetooth scanner not available")
-        except ImportError:
-            _LOGGER.error("Bluetooth integration not available")
-
-
-    def _async_handle_bluetooth_event(
-        self, service_info: BluetoothServiceInfoBleak, change: str
-    ) -> None:
-        """Handle Bluetooth event."""
-        # Log ALL Bluetooth events for debugging
-        _LOGGER.info("Bluetooth event: %s (%s) - name='%s', rssi=%s", 
-                    service_info.address, change, service_info.name, service_info.rssi)
-        
-        # Check if this might be our device by name
-        if service_info.name and "BT-TH" in service_info.name:
-            _LOGGER.warning("Found device with BT-TH name: %s (%s) - is this your MPPT device?", 
-                           service_info.name, service_info.address)
-        
-        # Only process events from our specific MAC address
-        if service_info.address.upper() != self._mac_address:
-            _LOGGER.debug("Ignoring event from %s (not our target %s)", service_info.address, self._mac_address)
-            return
+            # Get the Bluetooth device
+            ble_device = bluetooth.async_ble_device_from_address(
+                self.hass, self._mac_address, connectable=True
+            )
             
-        _LOGGER.info("Processing Bluetooth event from target device %s", service_info.address)
-        _LOGGER.debug("Service info: name=%s, rssi=%s", service_info.name, service_info.rssi)
-        
-        try:
-            if service_info.manufacturer_data:
-                _LOGGER.debug("Found manufacturer data: %s", service_info.manufacturer_data)
-                for manufacturer_id, value in service_info.manufacturer_data.items():
-                    _LOGGER.debug("Processing manufacturer data from ID %s: %s bytes", manufacturer_id, len(value))
-                    _LOGGER.debug("Raw data: %s", value.hex())
-                    decoded = parse_mppt_packet(value)
-                    _LOGGER.info("Successfully decoded MPPT data from %s: %s", service_info.address, decoded)
-                    self.data = decoded
-                    self.async_set_updated_data(decoded)
-                    break
-            else:
-                _LOGGER.warning("No manufacturer data found in Bluetooth advertisement from %s", service_info.address)
-                _LOGGER.debug("Available data - service_data: %s, service_uuids: %s", 
-                             service_info.service_data, service_info.service_uuids)
+            if not ble_device:
+                _LOGGER.warning("BLE device %s not found or not connectable", self._mac_address)
+                raise UpdateFailed(f"Device {self._mac_address} not found")
+
+            _LOGGER.debug("Connecting to device %s", self._mac_address)
+            
+            async with BleakClient(ble_device) as client:
+                _LOGGER.info("Connected to MPPT device %s", self._mac_address)
                 
-        except ValueError as e:
-            _LOGGER.warning("Data parsing error from %s: %s", service_info.address, e)
+                # List all services and characteristics for debugging
+                _LOGGER.debug("Discovering services...")
+                services = client.services
+                
+                for service in services:
+                    _LOGGER.debug("Service: %s (%s)", service.uuid, service.description)
+                    for char in service.characteristics:
+                        _LOGGER.debug("  Characteristic: %s - Properties: %s", 
+                                    char.uuid, char.properties)
+                
+                # Try to find the service UUID from const.py
+                service_uuid = SERVICE_UUID
+                _LOGGER.debug("Looking for service UUID: %s", service_uuid)
+                
+                # Try to read from the known service UUID
+                try:
+                    # First, try to find a characteristic that can be read
+                    target_service = None
+                    for service in services:
+                        if service.uuid.lower() == service_uuid.lower():
+                            target_service = service
+                            break
+                    
+                    if target_service:
+                        _LOGGER.info("Found target service: %s", target_service.uuid)
+                        
+                        # Look for readable characteristics
+                        for char in target_service.characteristics:
+                            if "read" in char.properties:
+                                _LOGGER.debug("Trying to read from characteristic: %s", char.uuid)
+                                try:
+                                    data = await client.read_gatt_char(char.uuid)
+                                    _LOGGER.info("Read %d bytes from characteristic %s", len(data), char.uuid)
+                                    _LOGGER.debug("Raw data: %s", data.hex())
+                                    
+                                    # Try to parse the data
+                                    parsed_data = parse_mppt_packet(data)
+                                    _LOGGER.info("Successfully parsed MPPT data: %s", parsed_data)
+                                    return parsed_data
+                                    
+                                except Exception as e:
+                                    _LOGGER.debug("Failed to read from characteristic %s: %s", char.uuid, e)
+                                    continue
+                    else:
+                        _LOGGER.warning("Target service %s not found", service_uuid)
+                        
+                        # Try to read from any readable characteristic as fallback
+                        _LOGGER.info("Trying to read from any available characteristic...")
+                        for service in services:
+                            for char in service.characteristics:
+                                if "read" in char.properties:
+                                    try:
+                                        _LOGGER.debug("Trying characteristic %s in service %s", char.uuid, service.uuid)
+                                        data = await client.read_gatt_char(char.uuid)
+                                        if len(data) >= 23:  # Our parser needs at least 23 bytes
+                                            _LOGGER.info("Found potential data in %s: %d bytes", char.uuid, len(data))
+                                            _LOGGER.debug("Raw data: %s", data.hex())
+                                            parsed_data = parse_mppt_packet(data)
+                                            _LOGGER.info("Successfully parsed MPPT data: %s", parsed_data)
+                                            return parsed_data
+                                    except Exception as e:
+                                        _LOGGER.debug("Failed to read from %s: %s", char.uuid, e)
+                                        continue
+                
+                except Exception as e:
+                    _LOGGER.error("Error reading from device: %s", e)
+                    raise UpdateFailed(f"Failed to read data: {e}")
+                
+                _LOGGER.warning("No readable data found on device")
+                raise UpdateFailed("No MPPT data available")
+                
+        except BleakError as e:
+            _LOGGER.error("Bluetooth connection error: %s", e)
+            raise UpdateFailed(f"Connection failed: {e}")
         except Exception as e:
-            _LOGGER.error("Unexpected error parsing MPPT BLE data from %s: %s", service_info.address, e, exc_info=True)
+            _LOGGER.error("Unexpected error: %s", e)
+            raise UpdateFailed(f"Update failed: {e}")
