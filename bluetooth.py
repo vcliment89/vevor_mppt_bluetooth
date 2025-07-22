@@ -61,7 +61,14 @@ class MPPTBLECoordinator(PassiveBluetoothDataUpdateCoordinator):
         self, service_info: BluetoothServiceInfoBleak, change: str
     ) -> None:
         """Handle Bluetooth event."""
-        _LOGGER.debug("Received Bluetooth event from %s (change: %s)", service_info.address, change)
+        # Log ALL Bluetooth events for debugging
+        _LOGGER.info("Bluetooth event: %s (%s) - name='%s', rssi=%s", 
+                    service_info.address, change, service_info.name, service_info.rssi)
+        
+        # Check if this might be our device by name
+        if service_info.name and "BT-TH" in service_info.name:
+            _LOGGER.warning("Found device with BT-TH name: %s (%s) - is this your MPPT device?", 
+                           service_info.name, service_info.address)
         
         # Only process events from our specific MAC address
         if service_info.address.upper() != self._mac_address:
@@ -84,6 +91,8 @@ class MPPTBLECoordinator(PassiveBluetoothDataUpdateCoordinator):
                     break
             else:
                 _LOGGER.warning("No manufacturer data found in Bluetooth advertisement from %s", service_info.address)
+                _LOGGER.debug("Available data - service_data: %s, service_uuids: %s", 
+                             service_info.service_data, service_info.service_uuids)
                 
         except ValueError as e:
             _LOGGER.warning("Data parsing error from %s: %s", service_info.address, e)

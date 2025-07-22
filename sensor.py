@@ -99,11 +99,10 @@ class MPPTSensor(CoordinatorEntity, SensorEntity):
     @property
     def available(self) -> bool:
         """Return if entity is available."""
-        is_available = self.coordinator.data is not None
-        _LOGGER.debug("Sensor %s availability: %s (coordinator data: %s)", 
-                     self._sensor_key, is_available, 
-                     "present" if self.coordinator.data else "None")
-        return is_available
+        has_data = self.coordinator.data is not None
+        _LOGGER.debug("Sensor %s availability check: coordinator.data=%s, has_data=%s", 
+                     self._sensor_key, self.coordinator.data, has_data)
+        return has_data
 
     @callback
     def _handle_coordinator_update(self) -> None:
