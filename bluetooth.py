@@ -196,42 +196,85 @@ class MPPTBLECoordinator(DataUpdateCoordinator):
             await self._client.start_notify(target_char, self.notification_handler)
             _LOGGER.info("Started notifications on characteristic %s", target_char.uuid)
             
-            # The device might need periodic polling to send data
-            # Let's try reading from the notification characteristic to trigger data
-            _LOGGER.info("Trying to read from notification characteristic to trigger data...")
-            try:
-                data = await self._client.read_gatt_char(target_char)
-                _LOGGER.info("Read %d bytes from notification characteristic: %s", len(data), data.hex())
+            # Since the Android app gets data, we need to find the right trigger
+            # Let's try writing to the write characteristic with different commands
+            write_char_uuid = "0000ffd1-0000-1000-8000-00805f9b34fb"
+            write_char = None
+            for service in services:
+                for char in service.characteristics:
+                    if char.uuid.lower() == write_char_uuid.lower():
+                        write_char = char
+                        break
+                if write_char:
+                    break
+            
+            if write_char:
+                _LOGGER.info("Found write characteristic, trying different trigger commands...")
                 
-                # If we got substantial data, try to parse it
-                if len(data) >= 23:
+                # Try various commands that might trigger continuous data
+                trigger_commands = [
+                    b'\xA5\x5A\x00\x00',  # Common wake-up pattern
+                    b'\xFF\xFF\xFF\xFF',  # All high pattern
+                    b'\x01\x02\x03\x04',  # Sequential pattern
+                    b'\xAA\x55\xAA\x55',  # Alternating pattern
+                    b'\x00\x01\x02\x03',  # Simple sequence
+                ]
+                
+                for i, cmd in enumerate(trigger_commands):
                     try:
-                        parsed_data = parse_mppt_packet(data)
-                        _LOGGER.info("Successfully parsed read data: %s", parsed_data)
-                        self._latest_data = parsed_data
-                        self.async_set_updated_data(parsed_data)
-                        return parsed_data
-                    except Exception as e:
-                        _LOGGER.debug("Failed to parse read data: %s", e)
+                        _LOGGER.info("Sending trigger command %d: %s", i+1, cmd.hex())
+                        await self._client.write_gatt_char(write_char, cmd)
                         
-            except Exception as e:
-                _LOGGER.debug("Failed to read from notification characteristic: %s", e)
+                        # Wait for response after each command
+                        self._notification_received.clear()
+                        try:
+                            await asyncio.wait_for(self._notification_received.wait(), timeout=5.0)
+                            if self._latest_data:
+                                _LOGGER.info("SUCCESS! Command %d triggered MPPT data", i+1)
+                                return self._latest_data
+                        except asyncio.TimeoutError:
+                            _LOGGER.debug("Command %d: no response", i+1)
+                            continue
+                            
+                    except Exception as e:
+                        _LOGGER.debug("Failed to send command %d: %s", i+1, e)
+                        continue
             
-            # Wait for automatic notifications after the read attempt
+            # Try reading from all readable characteristics to see if any contain data
+            _LOGGER.info("Trying to read from all readable characteristics...")
+            for service in services:
+                for char in service.characteristics:
+                    if "read" in char.properties:
+                        try:
+                            data = await self._client.read_gatt_char(char)
+                            _LOGGER.info("Read %d bytes from %s: %s", len(data), char.uuid, data.hex())
+                            
+                            if len(data) >= 23:
+                                try:
+                                    parsed_data = parse_mppt_packet(data)
+                                    _LOGGER.info("SUCCESS! Found MPPT data in characteristic %s: %s", char.uuid, parsed_data)
+                                    self._latest_data = parsed_data
+                                    self.async_set_updated_data(parsed_data)
+                                    return parsed_data
+                                except Exception as e:
+                                    _LOGGER.debug("Data from %s not MPPT format: %s", char.uuid, e)
+                                    
+                        except Exception as e:
+                            _LOGGER.debug("Failed to read from %s: %s", char.uuid, e)
+            
+            # Final attempt - wait longer for any notifications
+            _LOGGER.info("Final attempt - waiting 30 seconds for any notifications...")
             self._notification_received.clear()
-            _LOGGER.info("Waiting for notifications after read attempt...")
-            
             try:
-                await asyncio.wait_for(self._notification_received.wait(), timeout=20.0)
+                await asyncio.wait_for(self._notification_received.wait(), timeout=30.0)
                 if self._latest_data:
                     _LOGGER.info("Received MPPT data via notifications")
                     return self._latest_data
             except asyncio.TimeoutError:
                 pass
             
-            # If still no data, this might be normal if no solar activity
-            _LOGGER.info("No MPPT data received - this is normal if solar panels are not generating power")
-            _LOGGER.info("Connection will stay alive and sensors will update when solar activity resumes")
+            _LOGGER.warning("Could not retrieve MPPT data despite device being active")
+            _LOGGER.info("Connection will stay alive for future attempts")
             return None
                 
         except BleakError as e:
