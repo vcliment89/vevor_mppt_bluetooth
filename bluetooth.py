@@ -41,16 +41,31 @@ def parse_mppt_packet(data: bytes) -> dict:
 
 class MPPTBLECoordinator(PassiveBluetoothDataUpdateCoordinator):
     def __init__(self, hass, entry):
-        super().__init__(hass, _LOGGER, name=DOMAIN)
+        super().__init__(hass, _LOGGER)
         self.data = {}
+        self._mac_address = entry.data["mac_address"].upper()
+        self._entry = entry
 
-    @callback
-    def handle_bluetooth_event(self, service_info: BluetoothServiceInfoBleak):
+    async def async_start(self):
+        """Start the coordinator."""
+        # Register for Bluetooth advertisements from our specific device
+        return await super().async_start()
+
+    def _async_handle_bluetooth_event(
+        self, service_info: BluetoothServiceInfoBleak, change: str
+    ) -> None:
+        """Handle Bluetooth event."""
+        # Only process events from our specific MAC address
+        if service_info.address.upper() != self._mac_address:
+            return
+            
         try:
-            for _, value in service_info.manufacturer_data.items():
-                decoded = parse_mppt_packet(value)
-                _LOGGER.debug("Decoded MPPT: %s", decoded)
-                self.data = decoded
-                self.async_set_updated_data(decoded)
+            if service_info.manufacturer_data:
+                for _, value in service_info.manufacturer_data.items():
+                    decoded = parse_mppt_packet(value)
+                    _LOGGER.debug("Decoded MPPT data from %s: %s", service_info.address, decoded)
+                    self.data = decoded
+                    self.async_set_updated_data(decoded)
+                    break
         except Exception as e:
-            raise UpdateFailed(f"Failed to parse MPPT BLE data: {e}")
+            _LOGGER.error("Failed to parse MPPT BLE data from %s: %s", service_info.address, e)
