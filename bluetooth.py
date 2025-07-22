@@ -90,9 +90,16 @@ class MPPTBLECoordinator(DataUpdateCoordinator):
             _LOGGER.info("🎉 NOTIFICATION RECEIVED from %s: %d bytes", sender, len(data))
             _LOGGER.info("Raw notification data: %s", data.hex())
             
-            # Parse the notification data
+            # Check if this is a short notification (device acknowledgment)
+            if len(data) < 23:
+                _LOGGER.debug("Received short notification (%d bytes) - likely device acknowledgment", len(data))
+                # Don't parse short notifications, but signal that we got a response
+                self._notification_received.set()
+                return
+            
+            # Parse the full MPPT data notification
             parsed_data = parse_mppt_packet(data)
-            _LOGGER.info("Successfully parsed notification data: %s", parsed_data)
+            _LOGGER.info("Successfully parsed MPPT notification data: %s", parsed_data)
             
             self._latest_data = parsed_data
             self._notification_received.set()
@@ -189,45 +196,26 @@ class MPPTBLECoordinator(DataUpdateCoordinator):
             # Let's wait longer and see if we get any notifications
             self._notification_received.clear()
             
-            _LOGGER.info("Waiting for automatic notifications from device...")
-            try:
-                await asyncio.wait_for(self._notification_received.wait(), timeout=30.0)
-                _LOGGER.info("Received first notification successfully")
-                return self._latest_data
-            except asyncio.TimeoutError:
-                _LOGGER.warning("Timeout waiting for notifications - device may not be sending data")
-                
-                # Try a different approach - maybe the device needs to be "woken up"
-                # Let's try reading from a characteristic to trigger activity
-                _LOGGER.info("Trying to read from characteristics to trigger device...")
-                for service in services:
-                    for char in service.characteristics:
-                        if "read" in char.properties:
-                            try:
-                                _LOGGER.debug("Trying to read from %s", char.uuid)
-                                data = await self._client.read_gatt_char(char)
-                                _LOGGER.debug("Read %d bytes from %s: %s", len(data), char.uuid, data.hex())
-                                
-                                # Wait a bit more for notifications after reading
-                                self._notification_received.clear()
-                                await asyncio.wait_for(self._notification_received.wait(), timeout=10.0)
-                                if self._latest_data:
-                                    return self._latest_data
-                                    
-                            except asyncio.TimeoutError:
-                                continue
-                            except Exception as e:
-                                _LOGGER.debug("Failed to read from %s: %s", char.uuid, e)
-                                continue
-                
-                # If we still don't have data, let's keep the connection alive
-                # The device might only send notifications when there's solar activity
-                _LOGGER.warning("No notifications received yet - device may only send data during solar activity")
-                _LOGGER.info("Keeping connection alive and returning None - will retry later")
-                
-                # Don't raise an error, just return None to keep the connection alive
-                # The device might start sending notifications later when there's solar activity
-                return None
+            _LOGGER.info("Waiting for MPPT data notifications from device...")
+            
+            # Wait for multiple notification cycles to get full MPPT data
+            for attempt in range(3):
+                try:
+                    await asyncio.wait_for(self._notification_received.wait(), timeout=15.0)
+                    if self._latest_data:
+                        _LOGGER.info("Received MPPT data successfully on attempt %d", attempt + 1)
+                        return self._latest_data
+                    else:
+                        _LOGGER.debug("Got notification but no MPPT data yet, waiting for next...")
+                        self._notification_received.clear()
+                except asyncio.TimeoutError:
+                    _LOGGER.debug("Timeout on attempt %d, trying again...", attempt + 1)
+                    continue
+            
+            # If we still don't have full MPPT data, keep connection alive
+            _LOGGER.warning("No full MPPT data received yet - device may only send data during solar activity")
+            _LOGGER.info("Keeping connection alive - will receive notifications when solar system is active")
+            return None
                 
         except BleakError as e:
             _LOGGER.error("Bluetooth connection error: %s", e)
