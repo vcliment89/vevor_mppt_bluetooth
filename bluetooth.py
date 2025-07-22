@@ -76,25 +76,38 @@ class MPPTBLECoordinator(DataUpdateCoordinator):
 
             _LOGGER.debug("Connecting to device %s", self._mac_address)
             
-            async with BleakClient(ble_device) as client:
-                _LOGGER.info("Connected to MPPT device %s", self._mac_address)
+            # Try connection with timeout and better error handling
+            try:
+                client = BleakClient(ble_device, timeout=10.0)
+                await client.connect()
+                _LOGGER.info("Successfully connected to MPPT device %s", self._mac_address)
                 
-                # List all services and characteristics for debugging
-                _LOGGER.debug("Discovering services...")
-                services = client.services
-                
-                for service in services:
-                    _LOGGER.debug("Service: %s (%s)", service.uuid, service.description)
-                    for char in service.characteristics:
-                        _LOGGER.debug("  Characteristic: %s - Properties: %s", 
-                                    char.uuid, char.properties)
-                
-                # Try to find the service UUID from const.py
-                service_uuid = SERVICE_UUID
-                _LOGGER.debug("Looking for service UUID: %s", service_uuid)
-                
-                # Try to read from the known service UUID
                 try:
+                    # Check if we're actually connected
+                    if not client.is_connected:
+                        _LOGGER.error("Client reports not connected after connection attempt")
+                        raise UpdateFailed("Connection failed - client not connected")
+                    
+                    # List all services and characteristics for debugging
+                    _LOGGER.debug("Discovering services...")
+                    services = client.services
+                    
+                    if not services:
+                        _LOGGER.warning("No services discovered on device")
+                        raise UpdateFailed("No services found on device")
+                    
+                    _LOGGER.info("Discovered %d services on device", len(services))
+                    
+                    for service in services:
+                        _LOGGER.debug("Service: %s (%s)", service.uuid, service.description)
+                        for char in service.characteristics:
+                            _LOGGER.debug("  Characteristic: %s - Properties: %s", 
+                                        char.uuid, char.properties)
+                    
+                    # Try to find the service UUID from const.py
+                    service_uuid = SERVICE_UUID
+                    _LOGGER.debug("Looking for service UUID: %s", service_uuid)
+                    
                     # First, try to find a characteristic that can be read
                     target_service = None
                     for service in services:
@@ -142,17 +155,27 @@ class MPPTBLECoordinator(DataUpdateCoordinator):
                                     except Exception as e:
                                         _LOGGER.debug("Failed to read from %s: %s", char.uuid, e)
                                         continue
+                    
+                    _LOGGER.warning("No readable data found on device")
+                    raise UpdateFailed("No MPPT data available")
+                    
+                finally:
+                    # Always disconnect
+                    try:
+                        await client.disconnect()
+                        _LOGGER.debug("Disconnected from device")
+                    except Exception as e:
+                        _LOGGER.debug("Error during disconnect: %s", e)
+                        
+            except asyncio.TimeoutError:
+                _LOGGER.error("Connection timeout to device %s", self._mac_address)
+                raise UpdateFailed("Connection timeout")
+            except BleakError as e:
+                _LOGGER.error("Bluetooth connection error: %s", e)
+                raise UpdateFailed(f"Connection failed: {e}")
                 
-                except Exception as e:
-                    _LOGGER.error("Error reading from device: %s", e)
-                    raise UpdateFailed(f"Failed to read data: {e}")
-                
-                _LOGGER.warning("No readable data found on device")
-                raise UpdateFailed("No MPPT data available")
-                
-        except BleakError as e:
-            _LOGGER.error("Bluetooth connection error: %s", e)
-            raise UpdateFailed(f"Connection failed: {e}")
+        except UpdateFailed:
+            raise  # Re-raise UpdateFailed exceptions
         except Exception as e:
-            _LOGGER.error("Unexpected error: %s", e)
+            _LOGGER.error("Unexpected error: %s", e, exc_info=True)
             raise UpdateFailed(f"Update failed: {e}")
