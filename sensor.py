@@ -74,7 +74,7 @@ class MPPTSensor(CoordinatorEntity, SensorEntity):
             "name": self._config_entry.data["name"],
             "manufacturer": "VEVOR",
             "model": "MPPT Bluetooth Charger",
-            "via_device": (DOMAIN, self._config_entry.data.get("mac_address")),
+            "connections": {("mac", self._config_entry.data["mac_address"])},
         }
 
     @property
