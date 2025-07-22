@@ -52,7 +52,7 @@ class MPPTBLECoordinator(PassiveBluetoothDataUpdateCoordinator):
         super().__init__(
             hass, 
             _LOGGER, 
-            address=self._mac_address, 
+            address=None,  # Listen to ALL devices temporarily for debugging
             mode=BluetoothChange.ADVERTISEMENT
         )
         self.data = None  # Initialize as None instead of empty dict
