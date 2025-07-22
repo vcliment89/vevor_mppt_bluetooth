@@ -178,10 +178,34 @@ class MPPTBLECoordinator(DataUpdateCoordinator):
             await self._client.start_notify(target_char, self.notification_handler)
             _LOGGER.info("Started notifications on characteristic %s", target_char.uuid)
             
+            # Some devices need a trigger command to start sending data
+            # Let's try writing to the write characteristic we found
+            write_char_uuid = "0000ffd1-0000-1000-8000-00805f9b34fb"
+            write_char = None
+            for service in services:
+                for char in service.characteristics:
+                    if char.uuid.lower() == write_char_uuid.lower():
+                        write_char = char
+                        break
+                if write_char:
+                    break
+            
+            if write_char:
+                try:
+                    # Try sending a simple command to trigger data
+                    # Common trigger commands: 0x01, 0xFF, or empty
+                    trigger_commands = [b'\x01', b'\xFF', b'\x00']
+                    for cmd in trigger_commands:
+                        _LOGGER.debug("Trying to trigger notifications with command: %s", cmd.hex())
+                        await self._client.write_gatt_char(write_char, cmd)
+                        await asyncio.sleep(1)  # Wait a bit between commands
+                except Exception as e:
+                    _LOGGER.debug("Failed to write trigger command: %s", e)
+            
             # Wait for first notification
             self._notification_received.clear()
             try:
-                await asyncio.wait_for(self._notification_received.wait(), timeout=10.0)
+                await asyncio.wait_for(self._notification_received.wait(), timeout=15.0)
                 _LOGGER.info("Received first notification successfully")
                 return self._latest_data
             except asyncio.TimeoutError:
