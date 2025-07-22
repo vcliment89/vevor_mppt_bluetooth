@@ -133,9 +133,14 @@ class MPPTBLECoordinator(DataUpdateCoordinator):
             _LOGGER.debug("Connecting to device %s", self._mac_address)
             
             # Create new client
-            self._client = BleakClient(ble_device)
-            await self._client.connect()
-            _LOGGER.info("Connected to MPPT device %s", self._mac_address)
+            try:
+                self._client = BleakClient(ble_device)
+                _LOGGER.debug("Created BleakClient, attempting connection...")
+                await self._client.connect()
+                _LOGGER.info("Connected to MPPT device %s", self._mac_address)
+            except Exception as e:
+                _LOGGER.error("Failed to connect to device: %s", e, exc_info=True)
+                raise
             
             # Discover services
             services = self._client.services
