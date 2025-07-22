@@ -143,12 +143,21 @@ class MPPTBLECoordinator(DataUpdateCoordinator):
             
             # Create new client
             try:
-                self._client = BleakClient(ble_device)
+                # Clean up any existing client first
+                if self._client:
+                    try:
+                        await self._client.disconnect()
+                    except:
+                        pass
+                    self._client = None
+                
+                self._client = BleakClient(ble_device, timeout=15.0)
                 _LOGGER.debug("Created BleakClient, attempting connection...")
                 await self._client.connect()
                 _LOGGER.info("Connected to MPPT device %s", self._mac_address)
             except Exception as e:
                 _LOGGER.error("Failed to connect to device: %s", e, exc_info=True)
+                self._client = None
                 raise
             
             # Discover services
@@ -187,41 +196,10 @@ class MPPTBLECoordinator(DataUpdateCoordinator):
             await self._client.start_notify(target_char, self.notification_handler)
             _LOGGER.info("Started notifications on characteristic %s", target_char.uuid)
             
-            # From the nRF log, the device needs a trigger to start sending continuous data
-            # Let's try writing to the write characteristic to start the data flow
-            write_char_uuid = "0000ffd1-0000-1000-8000-00805f9b34fb"
-            write_char = None
-            for service in services:
-                for char in service.characteristics:
-                    if char.uuid.lower() == write_char_uuid.lower():
-                        write_char = char
-                        break
-                if write_char:
-                    break
-            
-            if write_char:
-                try:
-                    # Try MPPT data request commands based on Modbus protocol
-                    # The device responded with Modbus format, so let's request more data
-                    trigger_commands = [
-                        b'\x01\x03\x00\x00\x00\x20\x44\x06',  # Read 32 registers starting from 0
-                        b'\x01\x03\x00\x00\x00\x40\x44\x09',  # Read 64 registers starting from 0
-                        b'\x01\x04\x00\x00\x00\x20\x71\xC6',  # Read input registers (function 04)
-                        b'\x01\x03\x01\x00\x00\x10\x15\xC6',  # Read 16 registers from address 256
-                    ]
-                    
-                    for i, cmd in enumerate(trigger_commands):
-                        _LOGGER.info("Sending trigger command %d: %s", i+1, cmd.hex())
-                        await self._client.write_gatt_char(write_char, cmd)
-                        await asyncio.sleep(1)  # Wait between commands
-                        
-                except Exception as e:
-                    _LOGGER.warning("Failed to send trigger commands: %s", e)
-            else:
-                _LOGGER.warning("Write characteristic not found - cannot send trigger commands")
-            
-            # Give the device time to start sending data
-            await asyncio.sleep(3)
+            # From the nRF log, notifications start automatically after connection
+            # Let's wait longer without sending commands first
+            _LOGGER.info("Waiting for automatic notifications (like in nRF Connect log)...")
+            await asyncio.sleep(10)  # Wait 10 seconds for automatic notifications
             
             # Based on the nRF log, the device starts sending notifications automatically
             # Let's wait longer and see if we get any notifications
