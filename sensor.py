@@ -32,9 +32,6 @@ async def async_setup_entry(
     # Store coordinator in hass data
     hass.data[DOMAIN][config_entry.entry_id] = coordinator
     
-    # Start the coordinator to listen for Bluetooth advertisements
-    await coordinator.async_start()
-    
     sensors = [
         MPPTSensor(coordinator, config_entry, "solar_voltage", "Solar Voltage", UnitOfElectricPotential.VOLT, SensorDeviceClass.VOLTAGE),
         MPPTSensor(coordinator, config_entry, "solar_current", "Solar Current", UnitOfElectricCurrent.AMPERE, SensorDeviceClass.CURRENT),

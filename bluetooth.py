@@ -54,10 +54,6 @@ class MPPTBLECoordinator(PassiveBluetoothDataUpdateCoordinator):
         )
         self.data = {}
 
-    async def async_start(self):
-        """Start the coordinator."""
-        # Register for Bluetooth advertisements from our specific device
-        return await super().async_start()
 
     def _async_handle_bluetooth_event(
         self, service_info: BluetoothServiceInfoBleak, change: str
