@@ -1,5 +1,8 @@
-from homeassistant.components.bluetooth.passive_update_coordinator import PassiveBluetoothDataUpdateCoordinator
-from homeassistant.components.bluetooth import BluetoothServiceInfoBleak
+from homeassistant.components.bluetooth.passive_update_coordinator import (
+    PassiveBluetoothDataUpdateCoordinator,
+    PassiveBluetoothCoordinatorEntity,
+)
+from homeassistant.components.bluetooth import BluetoothServiceInfoBleak, BluetoothChange
 from homeassistant.core import callback
 from homeassistant.helpers.update_coordinator import UpdateFailed
 
@@ -41,10 +44,15 @@ def parse_mppt_packet(data: bytes) -> dict:
 
 class MPPTBLECoordinator(PassiveBluetoothDataUpdateCoordinator):
     def __init__(self, hass, entry):
-        super().__init__(hass, _LOGGER)
-        self.data = {}
         self._mac_address = entry.data["mac_address"].upper()
         self._entry = entry
+        super().__init__(
+            hass, 
+            _LOGGER, 
+            address=self._mac_address, 
+            mode=BluetoothChange.ADVERTISEMENT
+        )
+        self.data = {}
 
     async def async_start(self):
         """Start the coordinator."""
