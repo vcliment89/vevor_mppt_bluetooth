@@ -196,34 +196,42 @@ class MPPTBLECoordinator(DataUpdateCoordinator):
             await self._client.start_notify(target_char, self.notification_handler)
             _LOGGER.info("Started notifications on characteristic %s", target_char.uuid)
             
-            # From the nRF log, notifications start automatically after connection
-            # Let's wait longer without sending commands first
-            _LOGGER.info("Waiting for automatic notifications (like in nRF Connect log)...")
-            await asyncio.sleep(10)  # Wait 10 seconds for automatic notifications
+            # The device might need periodic polling to send data
+            # Let's try reading from the notification characteristic to trigger data
+            _LOGGER.info("Trying to read from notification characteristic to trigger data...")
+            try:
+                data = await self._client.read_gatt_char(target_char)
+                _LOGGER.info("Read %d bytes from notification characteristic: %s", len(data), data.hex())
+                
+                # If we got substantial data, try to parse it
+                if len(data) >= 23:
+                    try:
+                        parsed_data = parse_mppt_packet(data)
+                        _LOGGER.info("Successfully parsed read data: %s", parsed_data)
+                        self._latest_data = parsed_data
+                        self.async_set_updated_data(parsed_data)
+                        return parsed_data
+                    except Exception as e:
+                        _LOGGER.debug("Failed to parse read data: %s", e)
+                        
+            except Exception as e:
+                _LOGGER.debug("Failed to read from notification characteristic: %s", e)
             
-            # Based on the nRF log, the device starts sending notifications automatically
-            # Let's wait longer and see if we get any notifications
+            # Wait for automatic notifications after the read attempt
             self._notification_received.clear()
+            _LOGGER.info("Waiting for notifications after read attempt...")
             
-            _LOGGER.info("Waiting for MPPT data notifications from device...")
+            try:
+                await asyncio.wait_for(self._notification_received.wait(), timeout=20.0)
+                if self._latest_data:
+                    _LOGGER.info("Received MPPT data via notifications")
+                    return self._latest_data
+            except asyncio.TimeoutError:
+                pass
             
-            # Wait for multiple notification cycles to get full MPPT data
-            for attempt in range(3):
-                try:
-                    await asyncio.wait_for(self._notification_received.wait(), timeout=15.0)
-                    if self._latest_data:
-                        _LOGGER.info("Received MPPT data successfully on attempt %d", attempt + 1)
-                        return self._latest_data
-                    else:
-                        _LOGGER.debug("Got notification but no MPPT data yet, waiting for next...")
-                        self._notification_received.clear()
-                except asyncio.TimeoutError:
-                    _LOGGER.debug("Timeout on attempt %d, trying again...", attempt + 1)
-                    continue
-            
-            # If we still don't have full MPPT data, keep connection alive
-            _LOGGER.warning("No full MPPT data received yet - device may only send data during solar activity")
-            _LOGGER.info("Keeping connection alive - will receive notifications when solar system is active")
+            # If still no data, this might be normal if no solar activity
+            _LOGGER.info("No MPPT data received - this is normal if solar panels are not generating power")
+            _LOGGER.info("Connection will stay alive and sensors will update when solar activity resumes")
             return None
                 
         except BleakError as e:
