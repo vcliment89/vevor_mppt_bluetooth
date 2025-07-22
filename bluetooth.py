@@ -95,6 +95,18 @@ class MPPTBLECoordinator(PassiveBluetoothDataUpdateCoordinator):
                         if not target_found:
                             _LOGGER.warning("Target device %s NOT found in %d discovered devices", 
                                           self._mac_address, len(discovered))
+                        else:
+                            # Device found! Let's examine its data
+                            for device_info in discovered:
+                                if device_info.address.upper() == self._mac_address:
+                                    _LOGGER.info("EXAMINING TARGET DEVICE DATA:")
+                                    _LOGGER.info("  Address: %s", device_info.address)
+                                    _LOGGER.info("  Name: %s", device_info.name)
+                                    _LOGGER.info("  RSSI: %s", device_info.rssi)
+                                    _LOGGER.info("  Manufacturer data: %s", device_info.manufacturer_data)
+                                    _LOGGER.info("  Service data: %s", device_info.service_data)
+                                    _LOGGER.info("  Service UUIDs: %s", device_info.service_uuids)
+                                    break
                     else:
                         _LOGGER.warning("Could not get Bluetooth scanner instance")
                 except Exception as e:
