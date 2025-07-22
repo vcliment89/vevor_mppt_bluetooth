@@ -187,10 +187,39 @@ class MPPTBLECoordinator(DataUpdateCoordinator):
             await self._client.start_notify(target_char, self.notification_handler)
             _LOGGER.info("Started notifications on characteristic %s", target_char.uuid)
             
-            # The nRF log shows the device sends notifications automatically after connection
-            # But we might need to wait for the device to be ready
-            # Let's give it a moment to settle
-            await asyncio.sleep(2)
+            # From the nRF log, the device needs a trigger to start sending continuous data
+            # Let's try writing to the write characteristic to start the data flow
+            write_char_uuid = "0000ffd1-0000-1000-8000-00805f9b34fb"
+            write_char = None
+            for service in services:
+                for char in service.characteristics:
+                    if char.uuid.lower() == write_char_uuid.lower():
+                        write_char = char
+                        break
+                if write_char:
+                    break
+            
+            if write_char:
+                try:
+                    # Try common MPPT trigger commands
+                    trigger_commands = [
+                        b'\x01',  # Start command
+                        b'\xFF\x03\x01\x00\x00\x01\x84\x0A',  # Modbus-like read command
+                        b'\x01\x03\x00\x00\x00\x01\x84\x0A',  # Another common pattern
+                    ]
+                    
+                    for i, cmd in enumerate(trigger_commands):
+                        _LOGGER.info("Sending trigger command %d: %s", i+1, cmd.hex())
+                        await self._client.write_gatt_char(write_char, cmd)
+                        await asyncio.sleep(1)  # Wait between commands
+                        
+                except Exception as e:
+                    _LOGGER.warning("Failed to send trigger commands: %s", e)
+            else:
+                _LOGGER.warning("Write characteristic not found - cannot send trigger commands")
+            
+            # Give the device time to start sending data
+            await asyncio.sleep(3)
             
             # Based on the nRF log, the device starts sending notifications automatically
             # Let's wait longer and see if we get any notifications
