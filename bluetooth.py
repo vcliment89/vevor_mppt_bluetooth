@@ -87,8 +87,8 @@ class MPPTBLECoordinator(DataUpdateCoordinator):
     def notification_handler(self, sender, data):
         """Handle incoming notifications from the MPPT device."""
         try:
-            _LOGGER.debug("Received notification from %s: %d bytes", sender, len(data))
-            _LOGGER.debug("Raw notification data: %s", data.hex())
+            _LOGGER.info("🎉 NOTIFICATION RECEIVED from %s: %d bytes", sender, len(data))
+            _LOGGER.info("Raw notification data: %s", data.hex())
             
             # Parse the notification data
             parsed_data = parse_mppt_packet(data)
@@ -102,6 +102,8 @@ class MPPTBLECoordinator(DataUpdateCoordinator):
             
         except Exception as e:
             _LOGGER.error("Error parsing notification data: %s", e)
+            # Still set the event so we don't timeout
+            self._notification_received.set()
 
     async def _async_update_data(self):
         """Connect to device and set up notifications."""
@@ -178,38 +180,43 @@ class MPPTBLECoordinator(DataUpdateCoordinator):
             await self._client.start_notify(target_char, self.notification_handler)
             _LOGGER.info("Started notifications on characteristic %s", target_char.uuid)
             
-            # Some devices need a trigger command to start sending data
-            # Let's try writing to the write characteristic we found
-            write_char_uuid = "0000ffd1-0000-1000-8000-00805f9b34fb"
-            write_char = None
-            for service in services:
-                for char in service.characteristics:
-                    if char.uuid.lower() == write_char_uuid.lower():
-                        write_char = char
-                        break
-                if write_char:
-                    break
-            
-            if write_char:
-                try:
-                    # Try sending a simple command to trigger data
-                    # Common trigger commands: 0x01, 0xFF, or empty
-                    trigger_commands = [b'\x01', b'\xFF', b'\x00']
-                    for cmd in trigger_commands:
-                        _LOGGER.debug("Trying to trigger notifications with command: %s", cmd.hex())
-                        await self._client.write_gatt_char(write_char, cmd)
-                        await asyncio.sleep(1)  # Wait a bit between commands
-                except Exception as e:
-                    _LOGGER.debug("Failed to write trigger command: %s", e)
-            
-            # Wait for first notification
+            # Based on the nRF log, the device starts sending notifications automatically
+            # Let's wait longer and see if we get any notifications
             self._notification_received.clear()
+            
+            _LOGGER.info("Waiting for automatic notifications from device...")
             try:
-                await asyncio.wait_for(self._notification_received.wait(), timeout=15.0)
+                await asyncio.wait_for(self._notification_received.wait(), timeout=30.0)
                 _LOGGER.info("Received first notification successfully")
                 return self._latest_data
             except asyncio.TimeoutError:
-                _LOGGER.warning("Timeout waiting for first notification")
+                _LOGGER.warning("Timeout waiting for notifications - device may not be sending data")
+                
+                # Try a different approach - maybe the device needs to be "woken up"
+                # Let's try reading from a characteristic to trigger activity
+                _LOGGER.info("Trying to read from characteristics to trigger device...")
+                for service in services:
+                    for char in service.characteristics:
+                        if "read" in char.properties:
+                            try:
+                                _LOGGER.debug("Trying to read from %s", char.uuid)
+                                data = await self._client.read_gatt_char(char)
+                                _LOGGER.debug("Read %d bytes from %s: %s", len(data), char.uuid, data.hex())
+                                
+                                # Wait a bit more for notifications after reading
+                                self._notification_received.clear()
+                                await asyncio.wait_for(self._notification_received.wait(), timeout=10.0)
+                                if self._latest_data:
+                                    return self._latest_data
+                                    
+                            except asyncio.TimeoutError:
+                                continue
+                            except Exception as e:
+                                _LOGGER.debug("Failed to read from %s: %s", char.uuid, e)
+                                continue
+                
+                # If we still don't have data, return a failure but keep the connection
+                _LOGGER.warning("No notifications received - device may not be actively sending data")
                 raise UpdateFailed("No data received from device")
                 
         except BleakError as e:
