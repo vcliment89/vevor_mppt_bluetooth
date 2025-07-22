@@ -2,12 +2,10 @@
   "domain": "vevor_mppt_bluetooth",
   "name": "VEVOR MPPT Bluetooth Charger",
   "version": "1.0",
+  "config_flow": true,
   "documentation": "https://github.com/vcliment89/vevor_mppt_bluetooth",
-  "requirements": [],
+  "requirements": ["bleak>=0.19.0"],
   "codeowners": ["@vcliment89"],
   "dependencies": [],
-  "iot_class": "local_push",
-  "bluetooth": {
-    "manufacturer_id": 0xFFFF
-  }
+  "iot_class": "local_push"
 }
