@@ -13,6 +13,9 @@ PLATFORMS: list[Platform] = [Platform.SENSOR]
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     """Set up VEVOR MPPT Bluetooth from a config entry."""
     hass.data.setdefault(DOMAIN, {})
+    
+    # The coordinator will be created in the sensor platform
+    # Just store the entry data for now
     hass.data[DOMAIN][entry.entry_id] = entry.data
 
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
