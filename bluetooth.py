@@ -3,6 +3,7 @@ from homeassistant.components.bluetooth.passive_update_coordinator import (
     PassiveBluetoothCoordinatorEntity,
 )
 from homeassistant.components.bluetooth import BluetoothServiceInfoBleak, BluetoothChange
+from homeassistant.components import bluetooth
 from homeassistant.core import callback
 from homeassistant.helpers.update_coordinator import UpdateFailed
 
@@ -48,11 +49,11 @@ class MPPTBLECoordinator(PassiveBluetoothDataUpdateCoordinator):
         self._entry = entry
         _LOGGER.info("Initializing MPPT BLE Coordinator for MAC address: %s", self._mac_address)
         
-        # Try without specifying address to see if we get any events
+        # Use the MAC address but make event handler more permissive for debugging
         super().__init__(
             hass, 
             _LOGGER, 
-            address=None,  # Listen to ALL devices temporarily for debugging
+            address=self._mac_address, 
             mode=BluetoothChange.ADVERTISEMENT
         )
         self.data = None  # Initialize as None instead of empty dict
@@ -64,6 +65,26 @@ class MPPTBLECoordinator(PassiveBluetoothDataUpdateCoordinator):
             from homeassistant.components import bluetooth
             if hasattr(bluetooth, 'async_get_scanner'):
                 _LOGGER.info("Bluetooth scanner available")
+                
+                # Try to get current Bluetooth devices
+                try:
+                    scanner = bluetooth.async_get_scanner(hass)
+                    if scanner:
+                        _LOGGER.info("Bluetooth scanner instance obtained")
+                        # Get discovered devices
+                        discovered = bluetooth.async_discovered_service_info(hass)
+                        _LOGGER.info("Found %d discovered Bluetooth devices", len(discovered))
+                        
+                        # Log some device info for debugging
+                        for i, device_info in enumerate(discovered[:5]):  # Log first 5 devices
+                            _LOGGER.info("Device %d: %s (%s) - name='%s'", 
+                                       i+1, device_info.address, device_info.rssi, device_info.name)
+                            if device_info.address.upper() == self._mac_address:
+                                _LOGGER.warning("Found our target device in discovered devices!")
+                    else:
+                        _LOGGER.warning("Could not get Bluetooth scanner instance")
+                except Exception as e:
+                    _LOGGER.warning("Error checking discovered devices: %s", e)
             else:
                 _LOGGER.warning("Bluetooth scanner not available")
         except ImportError:
