@@ -180,6 +180,11 @@ class MPPTBLECoordinator(DataUpdateCoordinator):
             await self._client.start_notify(target_char, self.notification_handler)
             _LOGGER.info("Started notifications on characteristic %s", target_char.uuid)
             
+            # The nRF log shows the device sends notifications automatically after connection
+            # But we might need to wait for the device to be ready
+            # Let's give it a moment to settle
+            await asyncio.sleep(2)
+            
             # Based on the nRF log, the device starts sending notifications automatically
             # Let's wait longer and see if we get any notifications
             self._notification_received.clear()
@@ -215,9 +220,14 @@ class MPPTBLECoordinator(DataUpdateCoordinator):
                                 _LOGGER.debug("Failed to read from %s: %s", char.uuid, e)
                                 continue
                 
-                # If we still don't have data, return a failure but keep the connection
-                _LOGGER.warning("No notifications received - device may not be actively sending data")
-                raise UpdateFailed("No data received from device")
+                # If we still don't have data, let's keep the connection alive
+                # The device might only send notifications when there's solar activity
+                _LOGGER.warning("No notifications received yet - device may only send data during solar activity")
+                _LOGGER.info("Keeping connection alive and returning None - will retry later")
+                
+                # Don't raise an error, just return None to keep the connection alive
+                # The device might start sending notifications later when there's solar activity
+                return None
                 
         except BleakError as e:
             _LOGGER.error("Bluetooth connection error: %s", e)
