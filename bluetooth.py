@@ -76,11 +76,25 @@ class MPPTBLECoordinator(PassiveBluetoothDataUpdateCoordinator):
                         _LOGGER.info("Found %d discovered Bluetooth devices", len(discovered))
                         
                         # Log some device info for debugging
-                        for i, device_info in enumerate(discovered[:5]):  # Log first 5 devices
+                        device_list = list(discovered)[:5]  # Convert to list and get first 5
+                        for i, device_info in enumerate(device_list):
                             _LOGGER.info("Device %d: %s (%s) - name='%s'", 
                                        i+1, device_info.address, device_info.rssi, device_info.name)
                             if device_info.address.upper() == self._mac_address:
                                 _LOGGER.warning("Found our target device in discovered devices!")
+                        
+                        # Also check if our target device is in the full list
+                        target_found = False
+                        for device_info in discovered:
+                            if device_info.address.upper() == self._mac_address:
+                                _LOGGER.warning("TARGET DEVICE FOUND: %s - name='%s', rssi=%s", 
+                                              device_info.address, device_info.name, device_info.rssi)
+                                target_found = True
+                                break
+                        
+                        if not target_found:
+                            _LOGGER.warning("Target device %s NOT found in %d discovered devices", 
+                                          self._mac_address, len(discovered))
                     else:
                         _LOGGER.warning("Could not get Bluetooth scanner instance")
                 except Exception as e:
