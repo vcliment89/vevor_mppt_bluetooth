@@ -19,6 +19,9 @@ from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
 from .bluetooth import MPPTBLECoordinator
 from .const import DOMAIN
+import logging
+
+_LOGGER = logging.getLogger(__name__)
 
 
 async def async_setup_entry(
@@ -27,6 +30,9 @@ async def async_setup_entry(
     async_add_entities: AddEntitiesCallback,
 ) -> None:
     """Set up VEVOR MPPT Bluetooth sensors."""
+    _LOGGER.info("Setting up VEVOR MPPT Bluetooth sensors for entry: %s", config_entry.entry_id)
+    _LOGGER.debug("Config entry data: %s", config_entry.data)
+    
     coordinator = MPPTBLECoordinator(hass, config_entry)
     
     # Store coordinator in hass data
@@ -41,7 +47,9 @@ async def async_setup_entry(
         MPPTSensor(coordinator, config_entry, "battery_temperature", "Battery Temperature", UnitOfTemperature.CELSIUS, SensorDeviceClass.TEMPERATURE),
     ]
     
+    _LOGGER.info("Created %d MPPT sensors", len(sensors))
     async_add_entities(sensors)
+    _LOGGER.info("VEVOR MPPT Bluetooth sensors setup completed")
 
 
 class MPPTSensor(CoordinatorEntity, SensorEntity):
@@ -65,6 +73,7 @@ class MPPTSensor(CoordinatorEntity, SensorEntity):
         self._attr_device_class = device_class
         self._attr_state_class = SensorStateClass.MEASUREMENT
         self._config_entry = config_entry
+        _LOGGER.debug("Initialized sensor %s (key: %s, unique_id: %s)", self._attr_name, self._sensor_key, self._attr_unique_id)
 
     @property
     def device_info(self):
@@ -81,15 +90,24 @@ class MPPTSensor(CoordinatorEntity, SensorEntity):
     def native_value(self):
         """Return the state of the sensor."""
         if self.coordinator.data:
-            return self.coordinator.data.get(self._sensor_key)
+            value = self.coordinator.data.get(self._sensor_key)
+            _LOGGER.debug("Sensor %s returning value: %s", self._sensor_key, value)
+            return value
+        _LOGGER.debug("Sensor %s has no coordinator data, returning None", self._sensor_key)
         return None
 
     @property
     def available(self) -> bool:
         """Return if entity is available."""
-        return self.coordinator.data is not None
+        is_available = self.coordinator.data is not None
+        _LOGGER.debug("Sensor %s availability: %s (coordinator data: %s)", 
+                     self._sensor_key, is_available, 
+                     "present" if self.coordinator.data else "None")
+        return is_available
 
     @callback
     def _handle_coordinator_update(self) -> None:
         """Handle updated data from the coordinator."""
+        _LOGGER.debug("Sensor %s received coordinator update with data: %s", 
+                     self._sensor_key, self.coordinator.data)
         self.async_write_ha_state()

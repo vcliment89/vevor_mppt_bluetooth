@@ -46,6 +46,7 @@ class MPPTBLECoordinator(PassiveBluetoothDataUpdateCoordinator):
     def __init__(self, hass, entry):
         self._mac_address = entry.data["mac_address"].upper()
         self._entry = entry
+        _LOGGER.info("Initializing MPPT BLE Coordinator for MAC address: %s", self._mac_address)
         super().__init__(
             hass, 
             _LOGGER, 
@@ -53,23 +54,38 @@ class MPPTBLECoordinator(PassiveBluetoothDataUpdateCoordinator):
             mode=BluetoothChange.ADVERTISEMENT
         )
         self.data = {}
+        _LOGGER.info("MPPT BLE Coordinator initialized successfully")
 
 
     def _async_handle_bluetooth_event(
         self, service_info: BluetoothServiceInfoBleak, change: str
     ) -> None:
         """Handle Bluetooth event."""
+        _LOGGER.debug("Received Bluetooth event from %s (change: %s)", service_info.address, change)
+        
         # Only process events from our specific MAC address
         if service_info.address.upper() != self._mac_address:
+            _LOGGER.debug("Ignoring event from %s (not our target %s)", service_info.address, self._mac_address)
             return
             
+        _LOGGER.info("Processing Bluetooth event from target device %s", service_info.address)
+        _LOGGER.debug("Service info: name=%s, rssi=%s", service_info.name, service_info.rssi)
+        
         try:
             if service_info.manufacturer_data:
-                for _, value in service_info.manufacturer_data.items():
+                _LOGGER.debug("Found manufacturer data: %s", service_info.manufacturer_data)
+                for manufacturer_id, value in service_info.manufacturer_data.items():
+                    _LOGGER.debug("Processing manufacturer data from ID %s: %s bytes", manufacturer_id, len(value))
+                    _LOGGER.debug("Raw data: %s", value.hex())
                     decoded = parse_mppt_packet(value)
-                    _LOGGER.debug("Decoded MPPT data from %s: %s", service_info.address, decoded)
+                    _LOGGER.info("Successfully decoded MPPT data from %s: %s", service_info.address, decoded)
                     self.data = decoded
                     self.async_set_updated_data(decoded)
                     break
+            else:
+                _LOGGER.warning("No manufacturer data found in Bluetooth advertisement from %s", service_info.address)
+                
+        except ValueError as e:
+            _LOGGER.warning("Data parsing error from %s: %s", service_info.address, e)
         except Exception as e:
-            _LOGGER.error("Failed to parse MPPT BLE data from %s: %s", service_info.address, e)
+            _LOGGER.error("Unexpected error parsing MPPT BLE data from %s: %s", service_info.address, e, exc_info=True)
