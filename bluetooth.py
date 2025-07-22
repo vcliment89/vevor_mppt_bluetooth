@@ -47,14 +47,27 @@ class MPPTBLECoordinator(PassiveBluetoothDataUpdateCoordinator):
         self._mac_address = entry.data["mac_address"].upper()
         self._entry = entry
         _LOGGER.info("Initializing MPPT BLE Coordinator for MAC address: %s", self._mac_address)
+        
+        # Try without specifying address to see if we get any events
         super().__init__(
             hass, 
             _LOGGER, 
             address=self._mac_address, 
             mode=BluetoothChange.ADVERTISEMENT
         )
-        self.data = {}
+        self.data = None  # Initialize as None instead of empty dict
         _LOGGER.info("MPPT BLE Coordinator initialized successfully")
+        
+        # Add a test to see if Bluetooth is working at all
+        _LOGGER.info("Testing Bluetooth integration availability...")
+        try:
+            from homeassistant.components import bluetooth
+            if hasattr(bluetooth, 'async_get_scanner'):
+                _LOGGER.info("Bluetooth scanner available")
+            else:
+                _LOGGER.warning("Bluetooth scanner not available")
+        except ImportError:
+            _LOGGER.error("Bluetooth integration not available")
 
 
     def _async_handle_bluetooth_event(
