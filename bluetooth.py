@@ -201,11 +201,13 @@ class MPPTBLECoordinator(DataUpdateCoordinator):
             
             if write_char:
                 try:
-                    # Try common MPPT trigger commands
+                    # Try MPPT data request commands based on Modbus protocol
+                    # The device responded with Modbus format, so let's request more data
                     trigger_commands = [
-                        b'\x01',  # Start command
-                        b'\xFF\x03\x01\x00\x00\x01\x84\x0A',  # Modbus-like read command
-                        b'\x01\x03\x00\x00\x00\x01\x84\x0A',  # Another common pattern
+                        b'\x01\x03\x00\x00\x00\x20\x44\x06',  # Read 32 registers starting from 0
+                        b'\x01\x03\x00\x00\x00\x40\x44\x09',  # Read 64 registers starting from 0
+                        b'\x01\x04\x00\x00\x00\x20\x71\xC6',  # Read input registers (function 04)
+                        b'\x01\x03\x01\x00\x00\x10\x15\xC6',  # Read 16 registers from address 256
                     ]
                     
                     for i, cmd in enumerate(trigger_commands):
