@@ -144,7 +144,8 @@ class MPPTBLECoordinator(DataUpdateCoordinator):
             
             # Discover services
             services = self._client.services
-            _LOGGER.info("Discovered %d services", len(services))
+            service_count = len(list(services))
+            _LOGGER.info("Discovered %d services", service_count)
             
             # Log all services for debugging
             for service in services:
