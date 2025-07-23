@@ -6,7 +6,19 @@ from bleak.exc import BleakError
 from datetime import timedelta
 import asyncio
 
-from .const import DOMAIN, SERVICE_UUID
+from .const import (
+    DOMAIN,
+    NOTIFY_CHARACTERISTIC_UUID,
+    WRITE_CHARACTERISTIC_UUID,
+    CONTROLLER_REALDATA_CMD,
+    CONTROLLER_REALDATA_WITH_CRC_CMD,
+    NEW_DEVICE_REALDATA_CMD,
+    OLD_DEVICE_REALDATA_CMD,
+    MIN_DATA_LENGTH,
+    RESPONSE_TIMEOUT,
+    CONNECTION_TIMEOUT,
+    UPDATE_INTERVAL,
+)
 import logging
 import struct
 
@@ -14,16 +26,20 @@ _LOGGER = logging.getLogger(__name__)
 
 def parse_mppt_packet(data: bytes) -> dict:
     """Parse MPPT data packet from Bluetooth notification."""
-    if len(data) < 23:
-        raise ValueError(f"Data too short: expected at least 23 bytes, got {len(data)}")
+    if len(data) < MIN_DATA_LENGTH:
+        raise ValueError(f"Data too short: expected at least {MIN_DATA_LENGTH} bytes, got {len(data)}")
     
-    # Parse MPPT data using confirmed offsets
-    battery_volt_raw = int.from_bytes(data[5:7], "little")
-    battery_current_raw = int.from_bytes(data[7:9], "little")
-    battery_temp_raw = int.from_bytes(data[9:11], "little", signed=True)
-    solar_volt_raw = int.from_bytes(data[17:19], "little")
-    solar_current_raw = int.from_bytes(data[19:21], "little")
-    solar_power_raw = int.from_bytes(data[21:23], "little")
+    # Parse MPPT data using correct offsets from Android app JavaScript
+    # The data starts with FF03 header, so we need to account for that
+    # JavaScript uses substring which works on hex string, we work on bytes
+    # substring(10,14) in hex = bytes 5-7, substring(34,38) in hex = bytes 17-19, etc.
+    
+    battery_volt_raw = int.from_bytes(data[5:7], "little")      # substring(10,14) / 10
+    battery_current_raw = int.from_bytes(data[7:9], "little")   # substring(14,18) / 100  
+    battery_temp_raw = int.from_bytes(data[9:11], "little", signed=True)  # substring(18,20) with sign handling
+    solar_volt_raw = int.from_bytes(data[17:19], "little")     # substring(34,38) / 10
+    solar_current_raw = int.from_bytes(data[19:21], "little")  # substring(38,42) / 100
+    solar_power_raw = int.from_bytes(data[21:23], "little")    # substring(42,46) no division
 
     return {
         "solar_voltage": round(solar_volt_raw * 0.1, 2),
@@ -49,7 +65,7 @@ class MPPTBLECoordinator(DataUpdateCoordinator):
             hass,
             _LOGGER,
             name=DOMAIN,
-            update_interval=timedelta(seconds=60),  # Check connection every 60 seconds
+            update_interval=timedelta(seconds=UPDATE_INTERVAL),
         )
         
         _LOGGER.info("Initializing MPPT BLE Coordinator for MAC address: %s", self._mac_address)
@@ -122,11 +138,11 @@ class MPPTBLECoordinator(DataUpdateCoordinator):
                         pass
                     self._client = None
                 
-                self._client = BleakClient(ble_device, timeout=10.0)
+                self._client = BleakClient(ble_device, timeout=CONNECTION_TIMEOUT)
                 _LOGGER.debug("Created BleakClient, attempting connection...")
                 
                 # Use asyncio.wait_for for better timeout control
-                await asyncio.wait_for(self._client.connect(), timeout=10.0)
+                await asyncio.wait_for(self._client.connect(), timeout=CONNECTION_TIMEOUT)
                 _LOGGER.info("Connected to MPPT device %s", self._mac_address)
                 
             except asyncio.TimeoutError:
@@ -156,9 +172,8 @@ class MPPTBLECoordinator(DataUpdateCoordinator):
                     _LOGGER.debug("  Characteristic: %s - Properties: %s", 
                                 char.uuid, char.properties)
             
-            # From nRF log: Service 0000fff0-0000-1000-8000-00805f9b34fb
-            # Characteristic 0000fff1-0000-1000-8000-00805f9b34fb with notifications
-            target_char_uuid = "0000fff1-0000-1000-8000-00805f9b34fb"
+            # Find the notification characteristic from constants
+            target_char_uuid = NOTIFY_CHARACTERISTIC_UUID
             
             # Find the notification characteristic
             target_char = None
@@ -182,7 +197,7 @@ class MPPTBLECoordinator(DataUpdateCoordinator):
             
             # Since the Android app gets data, we need to find the right trigger
             # Let's try writing to the write characteristic with different commands
-            write_char_uuid = "0000ffd1-0000-1000-8000-00805f9b34fb"
+            write_char_uuid = WRITE_CHARACTERISTIC_UUID
             write_char = None
             for service in services:
                 for char in service.characteristics:
@@ -197,10 +212,10 @@ class MPPTBLECoordinator(DataUpdateCoordinator):
                 
                 # Use the exact commands from the Android app JavaScript
                 trigger_commands = [
-                    bytes.fromhex('FF0301000023'),  # ControllerRealdata - main real-time data command
-                    bytes.fromhex('FF03010000231031'),  # Complete command with CRC
-                    bytes.fromhex('FF0300FD000D'),  # NewDeviceRealdata
-                    bytes.fromhex('FF030100000A'),  # OldDeviceRealdata
+                    bytes.fromhex(CONTROLLER_REALDATA_CMD),  # ControllerRealdata - main real-time data command
+                    bytes.fromhex(CONTROLLER_REALDATA_WITH_CRC_CMD),  # Complete command with CRC
+                    bytes.fromhex(NEW_DEVICE_REALDATA_CMD),  # NewDeviceRealdata
+                    bytes.fromhex(OLD_DEVICE_REALDATA_CMD),  # OldDeviceRealdata
                 ]
                 
                 for i, cmd in enumerate(trigger_commands):
@@ -211,7 +226,7 @@ class MPPTBLECoordinator(DataUpdateCoordinator):
                         # Wait for response after each command
                         self._notification_received.clear()
                         try:
-                            await asyncio.wait_for(self._notification_received.wait(), timeout=5.0)
+                            await asyncio.wait_for(self._notification_received.wait(), timeout=RESPONSE_TIMEOUT)
                             if self._latest_data:
                                 _LOGGER.info("SUCCESS! Command %d triggered MPPT data", i+1)
                                 return self._latest_data
