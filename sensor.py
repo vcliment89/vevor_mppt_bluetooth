@@ -6,6 +6,7 @@ from homeassistant.components.sensor import (
     SensorEntity,
     SensorStateClass,
 )
+from homeassistant.helpers.entity import EntityCategory
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import (
     UnitOfElectricCurrent,
@@ -131,7 +132,7 @@ class MPPTDiagnosticSensor(CoordinatorEntity, SensorEntity):
         if device_class is not None:
             self._attr_device_class = device_class
         self._attr_state_class = SensorStateClass.MEASUREMENT
-        self._attr_entity_category = "diagnostic"  # Mark as diagnostic entity
+        self._attr_entity_category = EntityCategory.DIAGNOSTIC  # Mark as diagnostic entity
         if precision is not None:
             self._attr_suggested_display_precision = precision
         self._config_entry = config_entry
