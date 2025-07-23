@@ -46,8 +46,8 @@ async def async_setup_entry(
         MPPTSensor(coordinator, config_entry, "battery_voltage", "Battery Voltage", UnitOfElectricPotential.VOLT, SensorDeviceClass.VOLTAGE, 2),
         MPPTSensor(coordinator, config_entry, "battery_current", "Battery Current", UnitOfElectricCurrent.AMPERE, SensorDeviceClass.CURRENT, 2),
         MPPTSensor(coordinator, config_entry, "battery_temperature", "Battery Temperature", UnitOfTemperature.CELSIUS, SensorDeviceClass.TEMPERATURE, 1),
-        MPPTDiagnosticSensor(coordinator, config_entry, "link_quality", "Link Quality", PERCENTAGE, None, 0),
-        MPPTDiagnosticSensor(coordinator, config_entry, "signal_strength", "Signal Strength", SIGNAL_STRENGTH_DECIBELS_MILLIWATT, SensorDeviceClass.SIGNAL_STRENGTH, 0),
+        MPPTDiagnosticSensor(coordinator, config_entry, "link_quality", "Link Quality", PERCENTAGE, 0),
+        MPPTDiagnosticSensor(coordinator, config_entry, "signal_strength", "Signal Strength", SIGNAL_STRENGTH_DECIBELS_MILLIWATT, 0, SensorDeviceClass.SIGNAL_STRENGTH),
     ]
     
     _LOGGER.info("Created %d MPPT sensors", len(sensors))
@@ -119,8 +119,8 @@ class MPPTDiagnosticSensor(CoordinatorEntity, SensorEntity):
         sensor_key: str,
         name: str,
         unit: str,
-        device_class: SensorDeviceClass | None,
         precision: int = None,
+        device_class: SensorDeviceClass | None = None,
     ) -> None:
         """Initialize the diagnostic sensor."""
         super().__init__(coordinator)
@@ -128,7 +128,8 @@ class MPPTDiagnosticSensor(CoordinatorEntity, SensorEntity):
         self._attr_name = f"{config_entry.data['name']} {name}"
         self._attr_unique_id = f"{config_entry.entry_id}_{sensor_key}"
         self._attr_native_unit_of_measurement = unit
-        self._attr_device_class = device_class
+        if device_class is not None:
+            self._attr_device_class = device_class
         self._attr_state_class = SensorStateClass.MEASUREMENT
         self._attr_entity_category = "diagnostic"  # Mark as diagnostic entity
         if precision is not None:
