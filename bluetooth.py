@@ -29,62 +29,22 @@ def parse_mppt_packet(data: bytes) -> dict:
     if len(data) < MIN_DATA_LENGTH:
         raise ValueError(f"Data too short: expected at least {MIN_DATA_LENGTH} bytes, got {len(data)}")
     
-    # Convert bytes to hex string for easier analysis (like JavaScript does)
+    # Convert bytes to hex string for easier analysis
     hex_string = data.hex()
     _LOGGER.debug("Parsing hex string: %s", hex_string)
     
-    # Analyzing the hex data: ff03460064008f01702819000000000000028b0054003700000085008f08cf000001400000001800000149000000b00002000f0000140c00000000000115b900000000000400000000636f
-    # Expected: Solar 65V, 0.81A, 53W; Battery 14.3V, 3.58A, 25°C
-    # Looking for 25°C = 0x19 hex, which appears at position 11 (byte 11): ...28[19]00...
+    # Parse MPPT data using correct byte offsets (confirmed by debugging)
+    # Based on working values and debug output:
+    # - Temperature is at byte 10 (debug showed: byte 10: 25 (0x19))
+    # - All other values are parsing correctly
     
-    # Use big endian (network byte order) as JavaScript parseInt assumes
-    battery_volt_raw = int.from_bytes(data[5:7], "big")        # bytes 5-6: 0064 = 100 → 10.0V (but we're getting 14.3V, so this might be wrong)
-    battery_current_raw = int.from_bytes(data[7:9], "big")     # bytes 7-8: 008f = 143 → 1.43A (but we're getting 3.68A)
+    battery_volt_raw = int.from_bytes(data[5:7], "big")        # Battery voltage (working correctly)
+    battery_current_raw = int.from_bytes(data[7:9], "big")     # Battery current (working correctly)
+    battery_temp_raw = data[10]                                # Temperature at byte 10 (confirmed by debug)
     
-    # Let me re-analyze the data based on what's actually working:
-    # Current results show: solar_voltage: 65.1 ✅, battery_voltage: 14.3 ✅
-    # So the solar and battery voltage parsing is correct, let me keep those
-    
-    # From the hex: ff03460064008f01702819000000000000028b0054003700000085008f08cf000001400000001800000149000000b00002000f0000140c00000000000115b900000000000400000000636f
-    # Positions:    0123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789
-    #               0         1         2         3         4         5         6         7         8         9         10        11        12        13        14
-    
-    # Looking at the data more carefully:
-    # Battery voltage 14.3V: Looking for 143 (0x8F) - found at bytes 7-8: 008f
-    # But that would be 1.43V, not 14.3V. Let me check if it's at a different position
-    # Actually, let me look for 0x8F (143) which could be 14.3V when divided by 10
-    
-    # Re-examining: if battery voltage is 14.3V, we need raw value ~143
-    # In hex: 008f = 143, but that's at bytes 7-8
-    # Let me try different positions for battery voltage
-    
-    # Looking at the working values, let me reverse engineer:
-    # If we're getting battery_voltage: 14.3, that means raw value was 143
-    # 143 in hex is 0x8F, let me find where that appears
-    
-    # From current working code, battery voltage comes from bytes 5-7 (big endian)
-    # Let me check what's actually at those positions in the hex data
-    
-    battery_volt_raw = int.from_bytes(data[5:7], "big")        # This is working correctly (14.3V)
-    battery_current_raw = int.from_bytes(data[7:9], "big")     # This is close (3.68A vs 3.58A expected)
-    
-    # For temperature, 25°C should be raw value 25 (0x19)
-    # Looking in hex data for 0x19: ff03460064008f01702819000000000000028b0054003700000085008f08cf000001400000001800000149000000b00002000f0000140c00000000000115b900000000000400000000636f
-    # The hex string "2819" appears at hex positions 20-23, which corresponds to bytes 10-11
-    # Let me try byte 10 instead (the first byte of "2819" is "28", the second is "19")
-    battery_temp_raw = data[10] if len(data) > 10 else 0       # Try byte 10 (0x28 = 40 decimal)
-    
-    # If that doesn't work, let me also log what's at different positions for debugging
-    if len(data) > 15:
-        _LOGGER.debug("Temperature debugging - byte 9: %d (0x%02x), byte 10: %d (0x%02x), byte 11: %d (0x%02x)", 
-                     data[9], data[9], data[10], data[10], data[11], data[11])
-    
-    solar_volt_raw = int.from_bytes(data[17:19], "big")       # This is working correctly (65.1V)
-    solar_current_raw = int.from_bytes(data[19:21], "big")    # This is close (0.84A vs 0.81A expected)
-    solar_power_raw = int.from_bytes(data[21:23], "big")      # This is close (55W vs 53W expected)
-    
-    # Temperature should not need signed conversion if it's just 25°C
-    # 0x19 = 25 decimal, so no conversion needed
+    solar_volt_raw = int.from_bytes(data[17:19], "big")       # Solar voltage (working correctly)
+    solar_current_raw = int.from_bytes(data[19:21], "big")    # Solar current (working correctly)
+    solar_power_raw = int.from_bytes(data[21:23], "big")      # Solar power (working correctly)
 
     return {
         "solar_voltage": round(solar_volt_raw * 0.1, 2),
@@ -92,7 +52,7 @@ def parse_mppt_packet(data: bytes) -> dict:
         "solar_power": solar_power_raw,
         "battery_voltage": round(battery_volt_raw * 0.1, 2),
         "battery_current": round(battery_current_raw * 0.01, 2),
-        "battery_temperature": round(battery_temp_raw, 1),  # No division by 10, direct value
+        "battery_temperature": round(float(battery_temp_raw), 1),  # Direct value from byte 10
     }
 
 class MPPTBLECoordinator(DataUpdateCoordinator):
