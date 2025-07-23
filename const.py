@@ -26,9 +26,3 @@ MIN_DATA_LENGTH = 46  # Minimum bytes needed for full MPPT data
 RESPONSE_TIMEOUT = 5.0  # Seconds to wait for command response
 CONNECTION_TIMEOUT = 10.0  # Seconds to wait for Bluetooth connection
 UPDATE_INTERVAL = 60  # Seconds between coordinator updates
-
-# Device identification
-DEVICE_NAME_PREFIX = "BT-TH"
-
-# Legacy constant for backward compatibility
-SERVICE_UUID = NOTIFY_CHARACTERISTIC_UUID

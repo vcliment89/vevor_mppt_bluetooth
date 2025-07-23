@@ -29,17 +29,29 @@ def parse_mppt_packet(data: bytes) -> dict:
     if len(data) < MIN_DATA_LENGTH:
         raise ValueError(f"Data too short: expected at least {MIN_DATA_LENGTH} bytes, got {len(data)}")
     
-    # Parse MPPT data using correct offsets from Android app JavaScript
-    # The data starts with FF03 header, so we need to account for that
-    # JavaScript uses substring which works on hex string, we work on bytes
-    # substring(10,14) in hex = bytes 5-7, substring(34,38) in hex = bytes 17-19, etc.
+    # Convert bytes to hex string for easier analysis (like JavaScript does)
+    hex_string = data.hex()
+    _LOGGER.debug("Parsing hex string: %s", hex_string)
     
-    battery_volt_raw = int.from_bytes(data[5:7], "little")      # substring(10,14) / 10
-    battery_current_raw = int.from_bytes(data[7:9], "little")   # substring(14,18) / 100  
-    battery_temp_raw = int.from_bytes(data[9:11], "little", signed=True)  # substring(18,20) with sign handling
-    solar_volt_raw = int.from_bytes(data[17:19], "little")     # substring(34,38) / 10
-    solar_current_raw = int.from_bytes(data[19:21], "little")  # substring(38,42) / 100
-    solar_power_raw = int.from_bytes(data[21:23], "little")    # substring(42,46) no division
+    # JavaScript parsing from doDeviceShowRealValue function:
+    # Battery voltage: substring(10,14) = hex chars 10-13 (bytes 5-6) - big endian, /10
+    # Battery current: substring(14,18) = hex chars 14-17 (bytes 7-8) - big endian, /100
+    # Battery temp: substring(18,20) = hex chars 18-19 (byte 9) - signed, /10
+    # Solar voltage: substring(34,38) = hex chars 34-37 (bytes 17-18) - big endian, /10
+    # Solar current: substring(38,42) = hex chars 38-41 (bytes 19-20) - big endian, /100
+    # Solar power: substring(42,46) = hex chars 42-45 (bytes 21-22) - big endian, no division
+    
+    # Use big endian (network byte order) as JavaScript parseInt assumes
+    battery_volt_raw = int.from_bytes(data[5:7], "big")        # substring(10,14) / 10
+    battery_current_raw = int.from_bytes(data[7:9], "big")     # substring(14,18) / 100  
+    battery_temp_raw = int.from_bytes(data[9:10], "big")       # substring(18,20) single byte
+    solar_volt_raw = int.from_bytes(data[17:19], "big")       # substring(34,38) / 10
+    solar_current_raw = int.from_bytes(data[19:21], "big")    # substring(38,42) / 100
+    solar_power_raw = int.from_bytes(data[21:23], "big")      # substring(42,46) no division
+    
+    # Handle signed temperature (JavaScript uses hexTo128SignInt for temperature)
+    if battery_temp_raw > 127:
+        battery_temp_raw = battery_temp_raw - 256
 
     return {
         "solar_voltage": round(solar_volt_raw * 0.1, 2),
