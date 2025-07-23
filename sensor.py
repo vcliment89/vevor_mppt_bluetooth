@@ -13,6 +13,7 @@ from homeassistant.const import (
     UnitOfElectricPotential,
     UnitOfPower,
     UnitOfTemperature,
+    UnitOfEnergy,
     PERCENTAGE,
     SIGNAL_STRENGTH_DECIBELS_MILLIWATT,
 )
@@ -41,12 +42,33 @@ async def async_setup_entry(
     hass.data[DOMAIN][config_entry.entry_id] = coordinator
     
     sensors = [
+        # Basic MPPT sensors
         MPPTSensor(coordinator, config_entry, "solar_voltage", "Solar Voltage", UnitOfElectricPotential.VOLT, SensorDeviceClass.VOLTAGE, 2),
         MPPTSensor(coordinator, config_entry, "solar_current", "Solar Current", UnitOfElectricCurrent.AMPERE, SensorDeviceClass.CURRENT, 2),
         MPPTSensor(coordinator, config_entry, "solar_power", "Solar Power", UnitOfPower.WATT, SensorDeviceClass.POWER, 0),
         MPPTSensor(coordinator, config_entry, "battery_voltage", "Battery Voltage", UnitOfElectricPotential.VOLT, SensorDeviceClass.VOLTAGE, 2),
         MPPTSensor(coordinator, config_entry, "battery_current", "Battery Current", UnitOfElectricCurrent.AMPERE, SensorDeviceClass.CURRENT, 2),
         MPPTSensor(coordinator, config_entry, "battery_temperature", "Battery Temperature", UnitOfTemperature.CELSIUS, SensorDeviceClass.TEMPERATURE, 1),
+        
+        # Load/output sensors
+        MPPTSensor(coordinator, config_entry, "load_voltage", "Load Voltage", UnitOfElectricPotential.VOLT, SensorDeviceClass.VOLTAGE, 2),
+        MPPTSensor(coordinator, config_entry, "load_current", "Load Current", UnitOfElectricCurrent.AMPERE, SensorDeviceClass.CURRENT, 2),
+        MPPTSensor(coordinator, config_entry, "load_power", "Load Power", UnitOfPower.WATT, SensorDeviceClass.POWER, 0),
+        
+        # Energy statistics sensors
+        MPPTSensor(coordinator, config_entry, "daily_energy", "Daily Energy", UnitOfEnergy.KILO_WATT_HOUR, SensorDeviceClass.ENERGY, 2),
+        MPPTSensor(coordinator, config_entry, "total_energy", "Total Energy", UnitOfEnergy.KILO_WATT_HOUR, SensorDeviceClass.ENERGY, 2),
+        
+        # Maximum value sensors
+        MPPTSensor(coordinator, config_entry, "max_solar_voltage", "Max Solar Voltage", UnitOfElectricPotential.VOLT, SensorDeviceClass.VOLTAGE, 2),
+        MPPTSensor(coordinator, config_entry, "max_battery_voltage", "Max Battery Voltage", UnitOfElectricPotential.VOLT, SensorDeviceClass.VOLTAGE, 2),
+        MPPTSensor(coordinator, config_entry, "max_charging_current", "Max Charging Current", UnitOfElectricCurrent.AMPERE, SensorDeviceClass.CURRENT, 2),
+        
+        # Status sensors (no device class for these)
+        MPPTSensor(coordinator, config_entry, "charging_state", "Charging State", None, None, 0),
+        MPPTSensor(coordinator, config_entry, "error_code", "Error Code", None, None, 0),
+        
+        # Bluetooth diagnostic sensors
         MPPTDiagnosticSensor(coordinator, config_entry, "link_quality", "Link Quality", PERCENTAGE, 0),
         MPPTDiagnosticSensor(coordinator, config_entry, "signal_strength", "Signal Strength", SIGNAL_STRENGTH_DECIBELS_MILLIWATT, 0, SensorDeviceClass.SIGNAL_STRENGTH),
     ]

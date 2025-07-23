@@ -30,6 +30,7 @@ def parse_mppt_packet(data: bytes) -> dict:
         raise ValueError(f"Data too short: expected at least {MIN_DATA_LENGTH} bytes, got {len(data)}")
     
     # Parse MPPT data using confirmed byte offsets
+    # Basic readings
     battery_volt_raw = int.from_bytes(data[5:7], "big")
     battery_current_raw = int.from_bytes(data[7:9], "big")
     battery_temp_raw = data[10]
@@ -37,21 +38,61 @@ def parse_mppt_packet(data: bytes) -> dict:
     solar_volt_raw = int.from_bytes(data[17:19], "big")
     solar_current_raw = int.from_bytes(data[19:21], "big")
     solar_power_raw = int.from_bytes(data[21:23], "big")
+    
+    # Additional data fields from JavaScript analysis
+    # Load/output data (if available)
+    load_volt_raw = int.from_bytes(data[11:13], "big") if len(data) > 13 else 0
+    load_current_raw = int.from_bytes(data[13:15], "big") if len(data) > 15 else 0
+    load_power_raw = int.from_bytes(data[15:17], "big") if len(data) > 17 else 0
+    
+    # Status and state information
+    charging_state = data[23] if len(data) > 23 else 0
+    error_code = data[24] if len(data) > 24 else 0
+    
+    # Daily statistics (if available in longer packets)
+    daily_energy_raw = int.from_bytes(data[25:27], "big") if len(data) > 27 else 0
+    total_energy_raw = int.from_bytes(data[27:31], "big") if len(data) > 31 else 0
+    
+    # Maximum values recorded
+    max_solar_volt_raw = int.from_bytes(data[31:33], "big") if len(data) > 33 else solar_volt_raw
+    max_battery_volt_raw = int.from_bytes(data[33:35], "big") if len(data) > 35 else battery_volt_raw
+    max_charging_current_raw = int.from_bytes(data[35:37], "big") if len(data) > 37 else battery_current_raw
 
     parsed_data = {
+        # Basic MPPT readings
         "solar_voltage": round(solar_volt_raw * 0.1, 2),
         "solar_current": round(solar_current_raw * 0.01, 2),
         "solar_power": solar_power_raw,
         "battery_voltage": round(battery_volt_raw * 0.1, 2),
         "battery_current": round(battery_current_raw * 0.01, 2),
         "battery_temperature": round(float(battery_temp_raw), 1),
+        
+        # Load/output readings
+        "load_voltage": round(load_volt_raw * 0.1, 2),
+        "load_current": round(load_current_raw * 0.01, 2),
+        "load_power": load_power_raw,
+        
+        # Status information
+        "charging_state": charging_state,
+        "error_code": error_code,
+        
+        # Energy statistics
+        "daily_energy": round(daily_energy_raw * 0.01, 2),  # kWh
+        "total_energy": round(total_energy_raw * 0.01, 2),  # kWh
+        
+        # Maximum values
+        "max_solar_voltage": round(max_solar_volt_raw * 0.1, 2),
+        "max_battery_voltage": round(max_battery_volt_raw * 0.1, 2),
+        "max_charging_current": round(max_charging_current_raw * 0.01, 2),
     }
     
-    # Log only essential info: hex data and parsed values
-    _LOGGER.info("MPPT Data - HEX: %s | Solar: %.1fV/%.2fA/%dW | Battery: %.1fV/%.2fA/%.1f°C", 
+    # Enhanced logging with additional data
+    _LOGGER.info("MPPT Data - HEX: %s | Solar: %.1fV/%.2fA/%dW | Battery: %.1fV/%.2fA/%.1f°C | Load: %.1fV/%.2fA/%dW | State: %d | Daily: %.2fkWh", 
                 data.hex(), 
                 parsed_data["solar_voltage"], parsed_data["solar_current"], parsed_data["solar_power"],
-                parsed_data["battery_voltage"], parsed_data["battery_current"], parsed_data["battery_temperature"])
+                parsed_data["battery_voltage"], parsed_data["battery_current"], parsed_data["battery_temperature"],
+                parsed_data["load_voltage"], parsed_data["load_current"], parsed_data["load_power"],
+                parsed_data["charging_state"], parsed_data["daily_energy"])
     
     return parsed_data
 
