@@ -112,6 +112,37 @@ class MPPTBLECoordinator(DataUpdateCoordinator):
             
         return diagnostics
 
+    async def _send_data_request_command(self):
+        """Send command to request fresh MPPT data."""
+        try:
+            if not self._client or not self._client.is_connected:
+                return False
+                
+            # Find the write characteristic
+            write_char_uuid = WRITE_CHARACTERISTIC_UUID
+            write_char = None
+            for service in self._client.services:
+                for char in service.characteristics:
+                    if char.uuid.lower() == write_char_uuid.lower():
+                        write_char = char
+                        break
+                if write_char:
+                    break
+            
+            if write_char:
+                # Send the main real-time data command
+                cmd = bytes.fromhex(CONTROLLER_REALDATA_CMD)
+                await self._client.write_gatt_char(write_char, cmd)
+                self._notification_received.clear()
+                return True
+            else:
+                _LOGGER.debug("Write characteristic not found for periodic command")
+                return False
+                
+        except Exception as e:
+            _LOGGER.debug("Failed to send periodic data request command: %s", e)
+            return False
+
     def notification_handler(self, sender, data):
         """Handle incoming notifications from the MPPT device."""
         try:
@@ -153,16 +184,15 @@ class MPPTBLECoordinator(DataUpdateCoordinator):
 
             # If we already have a client connected, check if it's still connected
             if self._client and self._client.is_connected:
-                _LOGGER.debug("Client already connected, returning latest data")
-                if self._latest_data:
+                _LOGGER.debug("Client already connected, sending periodic command for fresh data")
+                # Send periodic command to trigger fresh data
+                await self._send_data_request_command()
+                # Wait for response
+                try:
+                    await asyncio.wait_for(self._notification_received.wait(), timeout=5.0)
                     return self._latest_data
-                else:
-                    # Wait a bit for notifications
-                    try:
-                        await asyncio.wait_for(self._notification_received.wait(), timeout=5.0)
-                        return self._latest_data
-                    except asyncio.TimeoutError:
-                        _LOGGER.warning("No notifications received, will reconnect")
+                except asyncio.TimeoutError:
+                    _LOGGER.warning("No notifications received after command, will reconnect")
 
             _LOGGER.debug("Connecting to device %s", self._mac_address)
             
