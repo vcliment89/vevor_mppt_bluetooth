@@ -13,55 +13,26 @@ import struct
 _LOGGER = logging.getLogger(__name__)
 
 def parse_mppt_packet(data: bytes) -> dict:
-    # The nRF log shows 70-byte packets, let's be more flexible with length
+    """Parse MPPT data packet from Bluetooth notification."""
     if len(data) < 23:
         raise ValueError(f"Data too short: expected at least 23 bytes, got {len(data)}")
     
-    # Based on nRF log analysis, the data format appears different
-    # Let's try to parse the actual format from the log
-    # Example from log: FF-03-46-00-64-00-8F-00-80-26-19-00...
-    
-    try:
-        # Try original parsing first
-        battery_volt_raw = int.from_bytes(data[5:7], "little")
-        battery_current_raw = int.from_bytes(data[7:9], "little")
-        battery_temp_raw = int.from_bytes(data[9:11], "little", signed=True)
-        solar_volt_raw = int.from_bytes(data[17:19], "little")
-        solar_current_raw = int.from_bytes(data[19:21], "little")
-        solar_power_raw = int.from_bytes(data[21:23], "little")
+    # Parse MPPT data using confirmed offsets
+    battery_volt_raw = int.from_bytes(data[5:7], "little")
+    battery_current_raw = int.from_bytes(data[7:9], "little")
+    battery_temp_raw = int.from_bytes(data[9:11], "little", signed=True)
+    solar_volt_raw = int.from_bytes(data[17:19], "little")
+    solar_current_raw = int.from_bytes(data[19:21], "little")
+    solar_power_raw = int.from_bytes(data[21:23], "little")
 
-        return {
-            "solar_voltage": round(solar_volt_raw * 0.1, 2),
-            "solar_current": round(solar_current_raw * 0.01, 2),
-            "solar_power": solar_power_raw,
-            "battery_voltage": round(battery_volt_raw * 0.1, 2),
-            "battery_current": round(battery_current_raw * 0.01, 2),
-            "battery_temperature": round(battery_temp_raw * 0.1, 2),
-        }
-    except Exception as e:
-        # If original parsing fails, try alternative parsing based on nRF log
-        _LOGGER.debug("Original parsing failed, trying alternative: %s", e)
-        
-        # From nRF log, let's try different offsets
-        # The packets start with FF-03, so real data might start at offset 2
-        if len(data) >= 30:
-            try:
-                # Try parsing with different offsets based on the nRF log pattern
-                alt_battery_volt = int.from_bytes(data[7:9], "little")
-                alt_solar_volt = int.from_bytes(data[9:11], "little") 
-                
-                return {
-                    "solar_voltage": round(alt_solar_volt * 0.1, 2),
-                    "solar_current": 0.0,  # Will need to find correct offset
-                    "solar_power": 0,
-                    "battery_voltage": round(alt_battery_volt * 0.1, 2),
-                    "battery_current": 0.0,
-                    "battery_temperature": 25.0,  # Default value
-                }
-            except Exception:
-                pass
-        
-        raise ValueError(f"Could not parse MPPT data from {len(data)} bytes")
+    return {
+        "solar_voltage": round(solar_volt_raw * 0.1, 2),
+        "solar_current": round(solar_current_raw * 0.01, 2),
+        "solar_power": solar_power_raw,
+        "battery_voltage": round(battery_volt_raw * 0.1, 2),
+        "battery_current": round(battery_current_raw * 0.01, 2),
+        "battery_temperature": round(battery_temp_raw * 0.1, 2),
+    }
 
 class MPPTBLECoordinator(DataUpdateCoordinator):
     """Coordinator for MPPT BLE device using notifications."""
@@ -141,7 +112,7 @@ class MPPTBLECoordinator(DataUpdateCoordinator):
 
             _LOGGER.debug("Connecting to device %s", self._mac_address)
             
-            # Create new client
+            # Create new client with better timeout handling
             try:
                 # Clean up any existing client first
                 if self._client:
@@ -151,14 +122,27 @@ class MPPTBLECoordinator(DataUpdateCoordinator):
                         pass
                     self._client = None
                 
-                self._client = BleakClient(ble_device, timeout=15.0)
+                self._client = BleakClient(ble_device, timeout=10.0)
                 _LOGGER.debug("Created BleakClient, attempting connection...")
-                await self._client.connect()
+                
+                # Use asyncio.wait_for for better timeout control
+                await asyncio.wait_for(self._client.connect(), timeout=10.0)
                 _LOGGER.info("Connected to MPPT device %s", self._mac_address)
-            except Exception as e:
-                _LOGGER.error("Failed to connect to device: %s", e, exc_info=True)
+                
+            except asyncio.TimeoutError:
+                _LOGGER.warning("Connection timeout to device %s - will retry later", self._mac_address)
                 self._client = None
-                raise
+                # Don't raise error, just return None to keep trying
+                return None
+            except asyncio.CancelledError:
+                _LOGGER.debug("Connection cancelled to device %s", self._mac_address)
+                self._client = None
+                return None
+            except Exception as e:
+                _LOGGER.warning("Failed to connect to device %s: %s", self._mac_address, e)
+                self._client = None
+                # Don't raise error, just return None to keep trying
+                return None
             
             # Discover services
             services = self._client.services
