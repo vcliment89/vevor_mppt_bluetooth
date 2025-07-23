@@ -76,6 +76,42 @@ class MPPTBLECoordinator(DataUpdateCoordinator):
         _LOGGER.info("Initializing MPPT BLE Coordinator for MAC address: %s", self._mac_address)
         _LOGGER.info("Using notification-based approach")
 
+    def _get_bluetooth_diagnostics(self) -> dict:
+        """Get Bluetooth diagnostic information."""
+        diagnostics = {
+            "link_quality": None,
+            "signal_strength": None,
+        }
+        
+        try:
+            # Get the BLE device from Home Assistant's Bluetooth integration
+            ble_device = bluetooth.async_ble_device_from_address(
+                self.hass, self._mac_address, connectable=True
+            )
+            
+            if ble_device and hasattr(ble_device, 'rssi') and ble_device.rssi is not None:
+                # RSSI (Received Signal Strength Indicator) in dBm
+                rssi = ble_device.rssi
+                diagnostics["signal_strength"] = rssi
+                
+                # Calculate link quality percentage based on RSSI
+                # RSSI typically ranges from -30 (excellent) to -90 (poor)
+                # Convert to 0-100% scale
+                if rssi >= -30:
+                    link_quality = 100
+                elif rssi <= -90:
+                    link_quality = 0
+                else:
+                    # Linear interpolation between -30 and -90 dBm
+                    link_quality = int(((rssi + 90) / 60) * 100)
+                
+                diagnostics["link_quality"] = max(0, min(100, link_quality))
+                
+        except Exception as e:
+            _LOGGER.debug("Could not get Bluetooth diagnostics: %s", e)
+            
+        return diagnostics
+
     def notification_handler(self, sender, data):
         """Handle incoming notifications from the MPPT device."""
         try:
@@ -87,6 +123,9 @@ class MPPTBLECoordinator(DataUpdateCoordinator):
             
             # Parse the full MPPT data notification (logging happens inside parse_mppt_packet)
             parsed_data = parse_mppt_packet(data)
+            
+            # Add Bluetooth diagnostic information
+            parsed_data.update(self._get_bluetooth_diagnostics())
             
             self._latest_data = parsed_data
             self._notification_received.set()
