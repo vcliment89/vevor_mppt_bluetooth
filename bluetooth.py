@@ -69,9 +69,15 @@ def parse_mppt_packet(data: bytes) -> dict:
     battery_current_raw = int.from_bytes(data[7:9], "big")     # This is close (3.68A vs 3.58A expected)
     
     # For temperature, 25°C should be raw value 25 (0x19)
-    # Looking in hex data for 0x19: ...2819... at position 10-11
-    # So temperature is at byte 11 (0-indexed)
-    battery_temp_raw = data[11] if len(data) > 11 else 0       # Try byte 11 where 0x19 appears
+    # Looking in hex data for 0x19: ff03460064008f01702819000000000000028b0054003700000085008f08cf000001400000001800000149000000b00002000f0000140c00000000000115b900000000000400000000636f
+    # The hex string "2819" appears at hex positions 20-23, which corresponds to bytes 10-11
+    # Let me try byte 10 instead (the first byte of "2819" is "28", the second is "19")
+    battery_temp_raw = data[10] if len(data) > 10 else 0       # Try byte 10 (0x28 = 40 decimal)
+    
+    # If that doesn't work, let me also log what's at different positions for debugging
+    if len(data) > 15:
+        _LOGGER.debug("Temperature debugging - byte 9: %d (0x%02x), byte 10: %d (0x%02x), byte 11: %d (0x%02x)", 
+                     data[9], data[9], data[10], data[10], data[11], data[11])
     
     solar_volt_raw = int.from_bytes(data[17:19], "big")       # This is working correctly (65.1V)
     solar_current_raw = int.from_bytes(data[19:21], "big")    # This is close (0.84A vs 0.81A expected)
