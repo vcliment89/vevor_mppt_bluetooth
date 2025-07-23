@@ -211,13 +211,12 @@ class MPPTBLECoordinator(DataUpdateCoordinator):
             if write_char:
                 _LOGGER.info("Found write characteristic, trying different trigger commands...")
                 
-                # Try various commands that might trigger continuous data
+                # Use the exact commands from the Android app JavaScript
                 trigger_commands = [
-                    b'\xA5\x5A\x00\x00',  # Common wake-up pattern
-                    b'\xFF\xFF\xFF\xFF',  # All high pattern
-                    b'\x01\x02\x03\x04',  # Sequential pattern
-                    b'\xAA\x55\xAA\x55',  # Alternating pattern
-                    b'\x00\x01\x02\x03',  # Simple sequence
+                    bytes.fromhex('FF0301000023'),  # ControllerRealdata - main real-time data command
+                    bytes.fromhex('FF03010000231031'),  # Complete command with CRC
+                    bytes.fromhex('FF0300FD000D'),  # NewDeviceRealdata
+                    bytes.fromhex('FF030100000A'),  # OldDeviceRealdata
                 ]
                 
                 for i, cmd in enumerate(trigger_commands):
