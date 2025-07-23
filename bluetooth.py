@@ -84,14 +84,14 @@ class MPPTBLECoordinator(DataUpdateCoordinator):
         }
         
         try:
-            # Get the BLE device from Home Assistant's Bluetooth integration
-            ble_device = bluetooth.async_ble_device_from_address(
-                self.hass, self._mac_address, connectable=True
-            )
+            # Get RSSI from Home Assistant's Bluetooth integration using the proper method
+            from homeassistant.components.bluetooth import async_get_advertisement_data
             
-            if ble_device and hasattr(ble_device, 'rssi') and ble_device.rssi is not None:
+            advertisement_data = async_get_advertisement_data(self.hass, self._mac_address)
+            
+            if advertisement_data and advertisement_data.rssi is not None:
                 # RSSI (Received Signal Strength Indicator) in dBm
-                rssi = ble_device.rssi
+                rssi = advertisement_data.rssi
                 diagnostics["signal_strength"] = rssi
                 
                 # Calculate link quality percentage based on RSSI
