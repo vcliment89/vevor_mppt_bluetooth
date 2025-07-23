@@ -29,31 +29,31 @@ def parse_mppt_packet(data: bytes) -> dict:
     if len(data) < MIN_DATA_LENGTH:
         raise ValueError(f"Data too short: expected at least {MIN_DATA_LENGTH} bytes, got {len(data)}")
     
-    # Convert bytes to hex string for easier analysis
-    hex_string = data.hex()
-    _LOGGER.debug("Parsing hex string: %s", hex_string)
+    # Parse MPPT data using confirmed byte offsets
+    battery_volt_raw = int.from_bytes(data[5:7], "big")
+    battery_current_raw = int.from_bytes(data[7:9], "big")
+    battery_temp_raw = data[10]
     
-    # Parse MPPT data using correct byte offsets (confirmed by debugging)
-    # Based on working values and debug output:
-    # - Temperature is at byte 10 (debug showed: byte 10: 25 (0x19))
-    # - All other values are parsing correctly
-    
-    battery_volt_raw = int.from_bytes(data[5:7], "big")        # Battery voltage (working correctly)
-    battery_current_raw = int.from_bytes(data[7:9], "big")     # Battery current (working correctly)
-    battery_temp_raw = data[10]                                # Temperature at byte 10 (confirmed by debug)
-    
-    solar_volt_raw = int.from_bytes(data[17:19], "big")       # Solar voltage (working correctly)
-    solar_current_raw = int.from_bytes(data[19:21], "big")    # Solar current (working correctly)
-    solar_power_raw = int.from_bytes(data[21:23], "big")      # Solar power (working correctly)
+    solar_volt_raw = int.from_bytes(data[17:19], "big")
+    solar_current_raw = int.from_bytes(data[19:21], "big")
+    solar_power_raw = int.from_bytes(data[21:23], "big")
 
-    return {
+    parsed_data = {
         "solar_voltage": round(solar_volt_raw * 0.1, 2),
         "solar_current": round(solar_current_raw * 0.01, 2),
         "solar_power": solar_power_raw,
         "battery_voltage": round(battery_volt_raw * 0.1, 2),
         "battery_current": round(battery_current_raw * 0.01, 2),
-        "battery_temperature": round(float(battery_temp_raw), 1),  # Direct value from byte 10
+        "battery_temperature": round(float(battery_temp_raw), 1),
     }
+    
+    # Log only essential info: hex data and parsed values
+    _LOGGER.info("MPPT Data - HEX: %s | Solar: %.1fV/%.2fA/%dW | Battery: %.1fV/%.2fA/%.1f°C", 
+                data.hex(), 
+                parsed_data["solar_voltage"], parsed_data["solar_current"], parsed_data["solar_power"],
+                parsed_data["battery_voltage"], parsed_data["battery_current"], parsed_data["battery_temperature"])
+    
+    return parsed_data
 
 class MPPTBLECoordinator(DataUpdateCoordinator):
     """Coordinator for MPPT BLE device using notifications."""
@@ -79,19 +79,14 @@ class MPPTBLECoordinator(DataUpdateCoordinator):
     def notification_handler(self, sender, data):
         """Handle incoming notifications from the MPPT device."""
         try:
-            _LOGGER.info("🎉 NOTIFICATION RECEIVED from %s: %d bytes", sender, len(data))
-            _LOGGER.info("Raw notification data: %s", data.hex())
-            
             # Check if this is a short notification (device acknowledgment)
             if len(data) < 23:
                 _LOGGER.debug("Received short notification (%d bytes) - likely device acknowledgment", len(data))
-                # Don't parse short notifications, but signal that we got a response
                 self._notification_received.set()
                 return
             
-            # Parse the full MPPT data notification
+            # Parse the full MPPT data notification (logging happens inside parse_mppt_packet)
             parsed_data = parse_mppt_packet(data)
-            _LOGGER.info("Successfully parsed MPPT notification data: %s", parsed_data)
             
             self._latest_data = parsed_data
             self._notification_received.set()
@@ -101,7 +96,6 @@ class MPPTBLECoordinator(DataUpdateCoordinator):
             
         except Exception as e:
             _LOGGER.error("Error parsing notification data: %s", e)
-            # Still set the event so we don't timeout
             self._notification_received.set()
 
     async def _async_update_data(self):

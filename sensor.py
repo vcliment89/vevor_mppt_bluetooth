@@ -31,7 +31,6 @@ async def async_setup_entry(
 ) -> None:
     """Set up VEVOR MPPT Bluetooth sensors."""
     _LOGGER.info("Setting up VEVOR MPPT Bluetooth sensors for entry: %s", config_entry.entry_id)
-    _LOGGER.debug("Config entry data: %s", config_entry.data)
     
     coordinator = MPPTBLECoordinator(hass, config_entry)
     
@@ -39,12 +38,12 @@ async def async_setup_entry(
     hass.data[DOMAIN][config_entry.entry_id] = coordinator
     
     sensors = [
-        MPPTSensor(coordinator, config_entry, "solar_voltage", "Solar Voltage", UnitOfElectricPotential.VOLT, SensorDeviceClass.VOLTAGE),
-        MPPTSensor(coordinator, config_entry, "solar_current", "Solar Current", UnitOfElectricCurrent.AMPERE, SensorDeviceClass.CURRENT),
-        MPPTSensor(coordinator, config_entry, "solar_power", "Solar Power", UnitOfPower.WATT, SensorDeviceClass.POWER),
-        MPPTSensor(coordinator, config_entry, "battery_voltage", "Battery Voltage", UnitOfElectricPotential.VOLT, SensorDeviceClass.VOLTAGE),
-        MPPTSensor(coordinator, config_entry, "battery_current", "Battery Current", UnitOfElectricCurrent.AMPERE, SensorDeviceClass.CURRENT),
-        MPPTSensor(coordinator, config_entry, "battery_temperature", "Battery Temperature", UnitOfTemperature.CELSIUS, SensorDeviceClass.TEMPERATURE),
+        MPPTSensor(coordinator, config_entry, "solar_voltage", "Solar Voltage", UnitOfElectricPotential.VOLT, SensorDeviceClass.VOLTAGE, 2),
+        MPPTSensor(coordinator, config_entry, "solar_current", "Solar Current", UnitOfElectricCurrent.AMPERE, SensorDeviceClass.CURRENT, 2),
+        MPPTSensor(coordinator, config_entry, "solar_power", "Solar Power", UnitOfPower.WATT, SensorDeviceClass.POWER, 0),
+        MPPTSensor(coordinator, config_entry, "battery_voltage", "Battery Voltage", UnitOfElectricPotential.VOLT, SensorDeviceClass.VOLTAGE, 2),
+        MPPTSensor(coordinator, config_entry, "battery_current", "Battery Current", UnitOfElectricCurrent.AMPERE, SensorDeviceClass.CURRENT, 2),
+        MPPTSensor(coordinator, config_entry, "battery_temperature", "Battery Temperature", UnitOfTemperature.CELSIUS, SensorDeviceClass.TEMPERATURE, 1),
     ]
     
     _LOGGER.info("Created %d MPPT sensors", len(sensors))
@@ -63,6 +62,7 @@ class MPPTSensor(CoordinatorEntity, SensorEntity):
         name: str,
         unit: str,
         device_class: SensorDeviceClass,
+        precision: int = None,
     ) -> None:
         """Initialize the sensor."""
         super().__init__(coordinator)
@@ -72,8 +72,9 @@ class MPPTSensor(CoordinatorEntity, SensorEntity):
         self._attr_native_unit_of_measurement = unit
         self._attr_device_class = device_class
         self._attr_state_class = SensorStateClass.MEASUREMENT
+        if precision is not None:
+            self._attr_suggested_display_precision = precision
         self._config_entry = config_entry
-        _LOGGER.debug("Initialized sensor %s (key: %s, unique_id: %s)", self._attr_name, self._sensor_key, self._attr_unique_id)
 
     @property
     def device_info(self):
@@ -90,23 +91,15 @@ class MPPTSensor(CoordinatorEntity, SensorEntity):
     def native_value(self):
         """Return the state of the sensor."""
         if self.coordinator.data:
-            value = self.coordinator.data.get(self._sensor_key)
-            _LOGGER.debug("Sensor %s returning value: %s", self._sensor_key, value)
-            return value
-        _LOGGER.debug("Sensor %s has no coordinator data, returning None", self._sensor_key)
+            return self.coordinator.data.get(self._sensor_key)
         return None
 
     @property
     def available(self) -> bool:
         """Return if entity is available."""
-        has_data = self.coordinator.data is not None
-        _LOGGER.debug("Sensor %s availability check: coordinator.data=%s, has_data=%s", 
-                     self._sensor_key, self.coordinator.data, has_data)
-        return has_data
+        return self.coordinator.data is not None
 
     @callback
     def _handle_coordinator_update(self) -> None:
         """Handle updated data from the coordinator."""
-        _LOGGER.debug("Sensor %s received coordinator update with data: %s", 
-                     self._sensor_key, self.coordinator.data)
         self.async_write_ha_state()
